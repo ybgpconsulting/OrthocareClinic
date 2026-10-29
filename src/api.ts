@@ -1,6 +1,30 @@
 import { ClinicSettings, ClinicContent, ServiceCategory, TreatmentService, GalleryItem, FAQItem, PatientEnquiry, AdminStats } from './types';
 
 const TOKEN_KEY = 'orthocare_admin_token';
+const FALLBACK_DATA_PATH = '/site-data.json';
+
+async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url}: ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function readJsonWithFallback<T>(url: string, init?: RequestInit): Promise<T> {
+  try {
+    return await readJson<T>(url, init);
+  } catch (error) {
+    const fallback = await readJson<Record<string, any>>(FALLBACK_DATA_PATH);
+    if (url === '/api/settings') return (fallback.settings ?? fallback) as T;
+    if (url === '/api/content') return (fallback.content ?? fallback) as T;
+    if (url === '/api/categories') return (fallback.categories ?? []) as T;
+    if (url === '/api/services' || url.startsWith('/api/services?')) return (fallback.services ?? []) as T;
+    if (url === '/api/gallery' || url.startsWith('/api/gallery?')) return (fallback.gallery ?? []) as T;
+    if (url === '/api/faqs' || url.startsWith('/api/faqs?')) return (fallback.faqs ?? []) as T;
+    throw error;
+  }
+}
 
 export const api = {
   // Auth token helpers
@@ -20,49 +44,37 @@ export const api = {
     };
     const token = this.getToken();
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      headers['Authorization'] = ['Bearer', token].join(' ');
     }
     return headers;
   },
 
   // Public & Shared
   async getSettings(): Promise<ClinicSettings> {
-    const res = await fetch('/api/settings');
-    if (!res.ok) throw new Error('Failed to fetch settings');
-    return res.json();
+    return readJsonWithFallback<ClinicSettings>('/api/settings');
   },
 
   async getContent(): Promise<ClinicContent> {
-    const res = await fetch('/api/content');
-    if (!res.ok) throw new Error('Failed to fetch content');
-    return res.json();
+    return readJsonWithFallback<ClinicContent>('/api/content');
   },
 
   async getCategories(): Promise<ServiceCategory[]> {
-    const res = await fetch('/api/categories');
-    if (!res.ok) throw new Error('Failed to fetch categories');
-    return res.json();
+    return readJsonWithFallback<ServiceCategory[]>('/api/categories');
   },
 
   async getServices(all = false): Promise<TreatmentService[]> {
     const url = all ? '/api/services?all=true' : '/api/services';
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch services');
-    return res.json();
+    return readJsonWithFallback<TreatmentService[]>(url, { headers: this.getHeaders() });
   },
 
   async getGallery(all = false): Promise<GalleryItem[]> {
     const url = all ? '/api/gallery?all=true' : '/api/gallery';
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch gallery');
-    return res.json();
+    return readJsonWithFallback<GalleryItem[]>(url, { headers: this.getHeaders() });
   },
 
   async getFaqs(all = false): Promise<FAQItem[]> {
     const url = all ? '/api/faqs?all=true' : '/api/faqs';
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch faqs');
-    return res.json();
+    return readJsonWithFallback<FAQItem[]>(url, { headers: this.getHeaders() });
   },
 
   async submitEnquiry(enquiry: {
