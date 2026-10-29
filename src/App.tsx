@@ -18,7 +18,16 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { RefreshCw } from 'lucide-react';
 
 function AppContent() {
-  const { activeView, selectedService, setSelectedService, isLoading, error, refreshData } = useClinic();
+  const {
+    activeView,
+    selectedService,
+    setSelectedService,
+    settings,
+    content,
+    isLoading,
+    error,
+    refreshData,
+  } = useClinic();
 
   useEffect(() => {
     const metadata = PAGE_METADATA[activeView] || PAGE_METADATA.home;
@@ -53,7 +62,7 @@ function AppContent() {
     );
   }
 
-  if (activeView !== 'admin' && error) {
+  if (activeView !== 'admin' && error && (!settings || !content)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <div className="max-w-md bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-4">
@@ -74,6 +83,23 @@ function AppContent() {
     <div className="site-background min-h-screen flex flex-col text-slate-900 selection:bg-blue-600 selection:text-white">
       {/* Top Header Navigation */}
       <Header />
+
+      {activeView !== 'admin' && error && settings && content && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex flex-col items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-950 sm:flex-row sm:px-6 sm:text-left lg:px-8"
+        >
+          <p>Clinic details could not be refreshed. The information shown may be out of date.</p>
+          <button
+            type="button"
+            onClick={() => void refreshData()}
+            className="min-h-11 rounded-lg px-4 font-semibold text-amber-950 underline underline-offset-4 transition-colors hover:bg-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-800"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Breadcrumb Navigation on all pages except Home */}
       <Breadcrumbs />

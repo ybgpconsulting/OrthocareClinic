@@ -91,7 +91,7 @@ export function ClinicProvider({
 
   const loadData = async () => {
     try {
-      setIsLoading(true);
+      if (!settings || !content) setIsLoading(true);
       setError(null);
       const [sData, cData, catData, srvData, gData, fData] = await Promise.all([
         api.getSettings(),

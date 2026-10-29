@@ -87,11 +87,13 @@ const isHttpsUrl: Validator = (value) => {
   }
 };
 
-const isOptionalIsoDate: Validator = (value) => {
+const isOptionalFutureIsoDate: Validator = (value) => {
   if (value === undefined || value === '') return true;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value &&
+    value >= new Date().toISOString().slice(0, 10);
 };
 
 export function isSafeImagePath(value: unknown): value is string {
@@ -212,7 +214,7 @@ export const enquiryRules: Record<string, Validator> = {
   patientName: isString(120, 2),
   phoneNumber: isString(24, 1),
   serviceRequested: isOptionalString(160),
-  preferredDate: isOptionalIsoDate,
+  preferredDate: isOptionalFutureIsoDate,
   preferredTimeSlot: isOptionalString(120),
   message: isOptionalString(2000),
   isHomeVisitRequested: isOptionalBoolean,

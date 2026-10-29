@@ -85,6 +85,30 @@ const ENQUIRY_MAX_SUBMISSIONS = 5;
 const LEGACY_PASSWORD_HASH_ITERATIONS = 10_000;
 const ENQUIRY_PAGE_SIZE = 50;
 const MAX_ENQUIRY_PAGE_SIZE = 100;
+const REQUIRED_D1_COLUMNS: Record<string, readonly string[]> = {
+  orthocare_clinic_state: ['id', 'revision', 'data'],
+  orthocare_clinic_sessions: ['token_hash', 'expires_at'],
+  orthocare_clinic_login_attempts: ['ip_hash', 'window_started_at', 'attempts', 'locked_until'],
+  orthocare_clinic_documents: ['document_key', 'data'],
+  orthocare_clinic_records: ['record_type', 'record_id', 'category_id', 'is_visible', 'sort_order', 'data'],
+  orthocare_clinic_enquiries: [
+    'id',
+    'patient_name',
+    'phone_number',
+    'service_requested',
+    'preferred_date',
+    'preferred_time_slot',
+    'message',
+    'is_home_visit_requested',
+    'status',
+    'internal_notes',
+    'created_at',
+    'updated_at',
+  ],
+  orthocare_clinic_admin: ['id', 'password_salt', 'password_hash'],
+  orthocare_clinic_data_meta: ['id', 'revision', 'mutation_token'],
+  orthocare_clinic_enquiry_attempts: ['ip_hash', 'window_started_at', 'attempts'],
+};
 
 class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -623,23 +647,29 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (resource === 'health' && method === 'GET') {
-    const schema = await env.DB
+    const tableResult = await env.DB
       .prepare(`SELECT COUNT(*) AS table_count FROM sqlite_master
-        WHERE type = 'table' AND name IN (
-          'orthocare_clinic_state',
-          'orthocare_clinic_sessions',
-          'orthocare_clinic_login_attempts',
-          'orthocare_clinic_documents',
-          'orthocare_clinic_records',
-          'orthocare_clinic_enquiries',
-          'orthocare_clinic_admin',
-          'orthocare_clinic_data_meta',
-          'orthocare_clinic_enquiry_attempts'
-        )`)
+        WHERE type = 'table' AND name IN (${Object.keys(REQUIRED_D1_COLUMNS).map(() => '?').join(', ')})`)
+      .bind(...Object.keys(REQUIRED_D1_COLUMNS))
       .first<{ table_count: number }>();
-    if (Number(schema?.table_count) !== 9) {
+    if (Number(tableResult?.table_count) !== Object.keys(REQUIRED_D1_COLUMNS).length) {
       return json({ status: 'unavailable' }, 503);
     }
+
+    const columnChecks = await Promise.all(
+      Object.entries(REQUIRED_D1_COLUMNS).map(async ([table, requiredColumns]) => {
+        const result = await env.DB
+          .prepare('SELECT name FROM pragma_table_info(?)')
+          .bind(table)
+          .all<{ name: string }>();
+        const columns = new Set((result.results || []).map(({ name }) => name));
+        return requiredColumns.every((column) => columns.has(column));
+      })
+    );
+    if (columnChecks.some((hasColumns) => !hasColumns)) {
+      return json({ status: 'unavailable' }, 503);
+    }
+
     return json({ status: 'ok', time: new Date().toISOString() });
   }
 

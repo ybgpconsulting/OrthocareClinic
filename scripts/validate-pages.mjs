@@ -43,7 +43,7 @@ async function getAvailablePort() {
   return port;
 }
 
-async function waitForPages(url) {
+async function waitForPages(url, expectedHealthStatus = 200) {
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     if (pagesProcess.exitCode !== null) {
@@ -51,7 +51,7 @@ async function waitForPages(url) {
     }
     try {
       const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(2000) });
-      if (response.ok) return;
+      if (response.status === expectedHealthStatus) return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
@@ -79,7 +79,7 @@ async function removeTemporaryDirectory() {
   }
 }
 
-async function startPages(databasePath) {
+async function startPages(databasePath, expectedHealthStatus = 200) {
   const port = await getAvailablePort();
   pagesProcess = spawn(process.execPath, [
     wranglerCli, 'pages', 'dev', 'dist',
@@ -93,7 +93,7 @@ async function startPages(databasePath) {
     env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
   });
   const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForPages(baseUrl);
+  await waitForPages(baseUrl, expectedHealthStatus);
   return baseUrl;
 }
 
@@ -282,9 +282,24 @@ async function testAdminApi(baseUrl) {
     requestOrigin: null,
   });
   await assertStatus(missingOriginEnquiry, 403, 'Enquiry without Origin');
+  const pastDateEnquiry = await request('/api/enquiries', {
+    method: 'POST',
+    body: {
+      patientName: 'Synthetic Patient',
+      phoneNumber: '9876543210',
+      preferredDate: '2000-01-01',
+    },
+    ip: '192.0.2.18',
+  });
+  await assertStatus(pastDateEnquiry, 400, 'Enquiry with a past preferred date');
   const acceptedEnquiry = await request('/api/enquiries', {
     method: 'POST',
-    body: { patientName: 'Synthetic Patient', phoneNumber: '9876543210', serviceRequested: 'CI smoke test' },
+    body: {
+      patientName: 'Synthetic Patient',
+      phoneNumber: '9876543210',
+      serviceRequested: 'CI smoke test',
+      preferredDate: '2099-12-31',
+    },
     ip: '192.0.2.19',
   });
   await assertStatus(acceptedEnquiry, 201, 'Valid public enquiry');
@@ -410,6 +425,16 @@ try {
   await testAdminApi(baseUrl);
   console.log('PASS synthetic legacy D1 migration, Pages API security, pagination, and admin session integration');
   await stopPages();
+
+  await runWrangler([
+    'd1', 'execute', databaseName, '--local', '--persist-to', databaseDirectory,
+    '--command', 'ALTER TABLE orthocare_clinic_admin RENAME COLUMN password_salt TO invalid_password_salt;',
+  ]);
+  const incompleteSchemaBaseUrl = await startPages(databaseDirectory, 503);
+  const incompleteHealth = await fetch(`${incompleteSchemaBaseUrl}/api/health`);
+  await assertStatus(incompleteHealth, 503, 'D1 health check with a required column missing');
+  await stopPages();
+  console.log('PASS D1 health check rejects an incomplete normalized schema');
 
   const freshDatabaseDirectory = path.join(temporaryDirectory, 'fresh-d1');
   await runWrangler([
