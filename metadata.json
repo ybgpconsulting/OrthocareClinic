@@ -1,0 +1,6 @@
+{
+  "name": "Orthocare Physiotherapy Clinic",
+  "description": "Official website and patient management system for Orthocare Physiotherapy Clinic in Tatiri, Baghpat led by Dr. Harshit Jain (PT).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

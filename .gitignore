@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+/data/clinic_data.json
+/public/uploads/*
+!/public/uploads/.gitkeep

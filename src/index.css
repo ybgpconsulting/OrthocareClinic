@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@theme {
+  --color-slate-50: #f7f8f5;
+  --color-slate-100: #eef1ec;
+  --color-slate-200: #dfe5dd;
+  --color-slate-300: #cbd5cb;
+  --color-slate-400: #89968c;
+  --color-slate-500: #68766d;
+  --color-slate-600: #526158;
+  --color-slate-700: #3b4b42;
+  --color-slate-800: #293a31;
+  --color-slate-900: #192d24;
+  --color-slate-950: #102119;
+  --color-blue-50: #eff6f1;
+  --color-blue-100: #dcebe1;
+  --color-blue-200: #bfd9c9;
+  --color-blue-300: #99bea8;
+  --color-blue-400: #6a9c7d;
+  --color-blue-500: #4a8464;
+  --color-blue-600: #356f55;
+  --color-blue-700: #2b5b47;
+  --color-blue-800: #214938;
+  --color-blue-900: #183a2e;
+  --color-blue-950: #10291f;
+  --color-amber-50: #fbf4ee;
+  --color-amber-100: #f3e4d7;
+  --color-amber-400: #e4a77b;
+  --color-amber-500: #bd7951;
+  --color-amber-600: #a56541;
+  --color-amber-700: #834d33;
+}
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-heading: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 3px solid #356f55;
+    outline-offset: 3px;
+  }
+
+  button:not(:disabled),
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  [id] {
+    scroll-margin-top: 6rem;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.02em;
+  }
+}
+
+.site-background {
+  position: relative;
+  isolation: isolate;
+  background-color: #f7f8f5;
+}
+
+.site-background::before {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  content: '';
+  pointer-events: none;
+  background-image: url('/images/orthocare-anatomy-background.jpg');
+  background-position: right 6% center;
+  background-repeat: no-repeat;
+  background-size: min(78vw, 780px) auto;
+  filter: saturate(0.55);
+  mix-blend-mode: multiply;
+  opacity: 0.16;
+  mask-image: linear-gradient(to left, #000 0%, rgba(0, 0, 0, 0.72) 58%, transparent 100%);
+}
+
+.site-background > footer {
+  position: relative;
+  z-index: 35;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5cb;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #89968c;
+}
+
+/* Hide scrollbar for clean horizontal tab rows on mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area support for iOS / mobile navigation bars */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+}
+
+@media (max-width: 767px) {
+  .site-background::before {
+    background-position: center 18rem;
+    background-size: min(100vw, 480px) auto;
+    mask-image: none;
+    opacity: 0.14;
+  }
+}
