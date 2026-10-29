@@ -1,6 +1,6 @@
 import React from 'react';
 import { useClinic } from '../context/ClinicContext';
-import { Activity, ChevronDown, Clock, MapPin, Phone } from 'lucide-react';
+import { ChevronDown, Clock, MapPin, Phone } from 'lucide-react';
 import { WeeklyHours } from './WeeklyHours';
 import { WhatsAppIcon } from './WhatsAppIcon';
 
@@ -31,14 +31,14 @@ export function Footer() {
 
         <div className="grid grid-cols-1 gap-7 border-b border-slate-800 pb-7 sm:grid-cols-2 lg:grid-cols-[1fr_0.8fr_1.2fr] lg:gap-10 lg:pb-8">
           <section aria-labelledby="footer-clinic" className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-800 bg-blue-900 text-white">
-                <Activity className="h-5 w-5 text-amber-400" aria-hidden="true" />
-              </div>
-              <div>
-                <h3 id="footer-clinic" className="text-base font-bold tracking-tight text-white">Orthocare</h3>
-                <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Physiotherapy Clinic</p>
-              </div>
+            <div id="footer-clinic" className="flex w-fit items-center rounded-lg bg-white px-2.5 py-1.5">
+              <img
+                src="/logos/orthocare-logo-horizontal-transparent.png"
+                alt="Orthocare Physiotherapy Clinic"
+                width="1400"
+                height="420"
+                className="h-auto w-40"
+              />
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-slate-300">
               {language === 'hi'

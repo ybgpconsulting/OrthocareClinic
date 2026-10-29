@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useClinic } from '../context/ClinicContext';
-import { Phone, Calendar, Activity, Languages } from 'lucide-react';
+import { Phone, Calendar, Languages } from 'lucide-react';
 
 export function Header() {
   const { settings, activeView, setActiveView, openAppointmentModal, language, setLanguage } = useClinic();
@@ -51,26 +51,23 @@ export function Header() {
     >
       <div className="mx-auto max-w-7xl px-4 max-[360px]:px-3 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-2 max-[360px]:gap-1 sm:h-20 sm:gap-4 lg:gap-8">
-          <button
-            onClick={() => handleNavClick('home')}
-            className="group flex shrink-0 items-center gap-2.5 rounded-xl text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-800 max-[360px]:gap-2 sm:gap-3"
+          <a
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              handleNavClick('home');
+            }}
+            className="flex shrink-0 items-center rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-800"
             aria-label="Orthocare Physiotherapy Clinic home"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-950 bg-blue-900 text-white shadow-sm transition-colors group-hover:bg-blue-800 max-[360px]:h-9 max-[360px]:w-9 sm:h-11 sm:w-11">
-              <Activity className="h-5 w-5 text-amber-400 sm:h-6 sm:w-6" aria-hidden="true" />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-heading whitespace-nowrap text-lg font-extrabold leading-none tracking-tight text-slate-900 max-[360px]:text-base sm:text-xl">
-                  Orthocare
-                </span>
-                <span className="hidden h-1.5 w-1.5 rounded-full bg-amber-600 sm:inline-block" />
-              </div>
-              <span className="mt-0.5 whitespace-nowrap text-[10px] font-bold uppercase leading-tight tracking-wider text-blue-900 max-[360px]:hidden sm:text-xs">
-                Physiotherapy Clinic
-              </span>
-            </div>
-          </button>
+            <img
+              src="/logos/orthocare-logo-horizontal-transparent.png"
+              alt="Orthocare Physiotherapy Clinic"
+              width="1400"
+              height="420"
+              className="h-auto w-[138px] max-[360px]:w-[116px] sm:w-[190px] xl:w-[208px]"
+            />
+          </a>
 
           <nav aria-label="Main navigation" className="hidden items-center gap-4 text-sm font-semibold text-slate-700 xl:flex 2xl:gap-6">
             {navLinks.map((link) => (
