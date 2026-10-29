@@ -12,7 +12,7 @@ development.
 ## Development
 
 For a fresh database, copy `.env.example` to `.env` and set
-`ADMIN_INITIAL_PASSWORD` to a unique password with at least 12 characters.
+`ADMIN_INITIAL_PASSWORD` to a unique password with at least 15 characters.
 Existing `data/clinic_data.json` files retain their current admin password.
 
 ```sh
@@ -47,7 +47,7 @@ configured for the Pages project and existing D1 database:
 3. Before the first API request against an empty D1 database, set the Pages
    secret `ADMIN_INITIAL_PASSWORD` in the Cloudflare dashboard. Alternatively,
    run `npx wrangler pages secret put ADMIN_INITIAL_PASSWORD --project-name orthocareclinic`
-   and enter the value at the prompt. Use a unique password of 12-128
+   and enter the value at the prompt. Use a unique password of 15-128
    characters. It is only used to seed a new empty D1 state; it does not reset
    an existing administrator password. Do not send the password in chat or
    commit it to the repository.
@@ -61,7 +61,15 @@ Admin sessions use an `HttpOnly`, `Secure`, `SameSite=Strict` cookie and are
 never accepted from URL parameters or authorization headers. Login attempts
 are rate-limited to five failures per IP within a 15-minute window using the
 hashed-IP records in D1. Changing the password revokes all active sessions and
-requires signing in again.
+requires signing in again. Passwords are currently stored with the legacy
+PBKDF2-HMAC-SHA-512 format at 10,000 iterations. The work factor was
+intentionally left unchanged while evaluating a secure design compatible
+with the selected Workers Free CPU budget; production CPU compatibility has
+not been measured. This is a weak work factor and remains a known offline
+password-cracking risk. The stronger KDF upgrade is deferred until a secure
+design is confirmed against the account's actual Pages CPU budget. Use a
+unique, high-entropy password, and do not treat the current hash as equivalent
+to a modern high-work-factor password hash.
 
 The Pages Functions expose the existing `/api/*` endpoints, persist clinic
 content, enquiries, and hashed admin sessions in D1. Image upload is
@@ -76,6 +84,10 @@ a honeypot, validate contact and date fields, and are limited to five accepted
 submissions per IP in a 15-minute window. D1 stores only a SHA-256 hash of the
 client IP for that rate limit; migration `0004_enquiry_rate_limits.sql` creates
 the rate-limit table. JSON request bodies are capped at 512 KiB.
+Mutation requests require a same-origin `Origin` header. API responses use
+`Cache-Control: no-store`; static Pages responses include a restrictive
+Content Security Policy and security headers. Administrator enquiry lists
+are loaded using indexed, cursor-based pages of 50 records (maximum 100).
 D1 is initialized lazily on the first API request after the migration and
 secret are configured. Existing D1 state is never overwritten. The local
 `data/clinic_data.json` database and `public/uploads/` files are not copied
@@ -97,8 +109,14 @@ For production, take an export outside the repository first, then use a brief
 maintenance window to prevent old application versions from writing only to
 the legacy state while cutover is in progress:
 
-```sh
-npx wrangler d1 export orthocareclinic --remote --output ./orthocareclinic-before-normalization.sql
+In PowerShell, create the backup outside the repository and keep it in a
+protected location:
+
+```powershell
+$backupDirectory = Join-Path $env:USERPROFILE "secure-backups"
+New-Item -ItemType Directory -Force -Path $backupDirectory | Out-Null
+$backupPath = Join-Path $backupDirectory "orthocareclinic-before-normalization.sql"
+npx wrangler d1 export orthocareclinic --remote --output $backupPath
 npm run cf:d1:remote
 npm run cf:deploy
 ```
@@ -115,14 +133,22 @@ to the old application after normalized writes begin unless those writes have
 also been exported or reverse-migrated.
 
 After migration, Pages Functions write clinic records through revision-checked
-D1 batches and store enquiries directly as indexed rows. Enquiry lists are
-ordered and fetched from D1 rather than loading the full enquiry history into
-the clinic-state document. Apply all pending migrations, including
-`0004_enquiry_rate_limits.sql` and `0005_confirmed_business_hours.sql`, before
-deploying. Migration 0005 corrects the hours only when the stored settings
+D1 batches and store enquiries directly as indexed rows. Enquiry lists use
+cursor pagination instead of returning the full enquiry history. Apply all
+pending migrations, including `0004_enquiry_rate_limits.sql`,
+`0005_confirmed_business_hours.sql`, and `0006_enquiry_and_session_indexes.sql`,
+before deploying. Migration 0005 corrects the hours only when the stored settings
 still contain the exact previous seed hours and have no custom weekly schedule;
 it also updates the address only when it exactly matches the previous seed
 address. Other customized D1 settings are preserved.
+
+The health endpoint verifies that the complete D1 schema is present and returns
+HTTP 503 when required migrations are missing. The Pages integration test starts from a synthetic legacy `0001` database,
+applies every migration, checks that legacy content and enquiries remain
+readable, and exercises cookie authentication, password rotation and session
+revocation, rate limits, and cursor pagination. It also checks first-admin
+initialization against a separate fresh local database. Both databases are
+temporary and synthetic.
 
 ### Local Cloudflare runtime
 
@@ -273,7 +299,7 @@ variables):
 - `CLOUDFLARE_ACCOUNT_ID` to your Cloudflare account ID
 - `CLOUDFLARE_D1_DATABASE_ID` to the D1 database ID
 - `CLOUDFLARE_API_TOKEN` to a token with D1 Read and D1 Write permissions
-- `ADMIN_INITIAL_PASSWORD` to a unique password of at least 12 characters if
+- `ADMIN_INITIAL_PASSWORD` to a unique password of at least 15 characters if
   the D1 clinic state has not been initialized yet
 
 `CLOUDFLARE_D1_DATABASE_NAME` is optional and is used only in startup logs.

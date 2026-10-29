@@ -2,7 +2,26 @@ import { ClinicDatabase } from './types';
 import crypto from 'crypto';
 
 export function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+  return crypto.pbkdf2Sync(password, salt, 10_000, 64, 'sha512').toString('hex');
+}
+
+export function verifyPasswordHash(
+  password: string,
+  salt: string,
+  storedHash: string
+): { matches: boolean } {
+  if (!/^[0-9a-f]{32}$/i.test(salt)) {
+    throw new Error('Stored administrator password salt has an invalid format.');
+  }
+  if (!/^[0-9a-f]{128}$/i.test(storedHash)) {
+    throw new Error('Stored administrator password hash uses an unsupported format.');
+  }
+  const expected = Buffer.from(storedHash, 'hex');
+  const hexSaltCandidate = crypto.pbkdf2Sync(password, Buffer.from(salt, 'hex'), 10_000, 64, 'sha512');
+  const textSaltCandidate = crypto.pbkdf2Sync(password, salt, 10_000, 64, 'sha512');
+  const matchesHexSalt = crypto.timingSafeEqual(hexSaltCandidate, expected);
+  const matchesTextSalt = crypto.timingSafeEqual(textSaltCandidate, expected);
+  return { matches: matchesHexSalt || matchesTextSalt };
 }
 
 export function generateSalt(): string {

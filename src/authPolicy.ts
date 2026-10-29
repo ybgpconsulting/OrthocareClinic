@@ -1,4 +1,4 @@
-export const ADMIN_PASSWORD_MIN_LENGTH = 12;
+export const ADMIN_PASSWORD_MIN_LENGTH = 15;
 export const ADMIN_PASSWORD_MAX_LENGTH = 128;
 
 export function getAdminPasswordPolicyError(password: string): string | null {

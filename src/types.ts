@@ -123,6 +123,16 @@ export interface PatientEnquiry {
   updatedAt: string;
 }
 
+export interface EnquiryCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface EnquiryPage {
+  items: PatientEnquiry[];
+  nextCursor: EnquiryCursor | null;
+}
+
 export interface AdminStats {
   servicesCount: number;
   visibleServicesCount: number;

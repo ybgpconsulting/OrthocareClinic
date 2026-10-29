@@ -10,6 +10,7 @@ import {
   FAQItem,
   ClinicSettings,
   ClinicContent,
+  EnquiryCursor,
 } from '../../types';
 import {
   Lock,
@@ -66,6 +67,8 @@ export function AdminDashboard() {
   // Admin Data state
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [enquiries, setEnquiries] = useState<PatientEnquiry[]>([]);
+  const [enquiriesCursor, setEnquiriesCursor] = useState<EnquiryCursor | null>(null);
+  const [isLoadingEnquiriesPage, setIsLoadingEnquiriesPage] = useState(false);
   const [services, setServices] = useState<TreatmentService[]>([]);
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
@@ -149,7 +152,7 @@ export function AdminDashboard() {
       setAdminDataError(null);
       const [sStats, sEnqs, sSrvs, sCats, sGal, sFaqs, sSet, sCont] = await Promise.all([
         api.getStats(),
-        api.getEnquiries(),
+        api.getEnquiriesPage(enquiryStatusFilter),
         api.getServices(true),
         api.getCategories(),
         api.getGallery(true),
@@ -159,7 +162,8 @@ export function AdminDashboard() {
       ]);
 
       setStats(sStats);
-      setEnquiries(sEnqs);
+      setEnquiries(sEnqs.items);
+      setEnquiriesCursor(sEnqs.nextCursor);
       setServices(sSrvs);
       setCategories(sCats);
       setGallery(sGal);
@@ -183,6 +187,34 @@ export function AdminDashboard() {
     }, 4500);
   };
 
+  const changeEnquiryFilter = async (status: string) => {
+    setEnquiryStatusFilter(status);
+    setIsLoadingEnquiriesPage(true);
+    try {
+      const page = await api.getEnquiriesPage(status);
+      setEnquiries(page.items);
+      setEnquiriesCursor(page.nextCursor);
+    } catch (err: unknown) {
+      showFeedback('error', err instanceof Error ? err.message : 'Failed to load enquiries.');
+    } finally {
+      setIsLoadingEnquiriesPage(false);
+    }
+  };
+
+  const loadMoreEnquiries = async () => {
+    if (!enquiriesCursor || isLoadingEnquiriesPage) return;
+    setIsLoadingEnquiriesPage(true);
+    try {
+      const page = await api.getEnquiriesPage(enquiryStatusFilter, enquiriesCursor);
+      setEnquiries((current) => [...current, ...page.items]);
+      setEnquiriesCursor(page.nextCursor);
+    } catch (err: unknown) {
+      showFeedback('error', err instanceof Error ? err.message : 'Failed to load more enquiries.');
+    } finally {
+      setIsLoadingEnquiriesPage(false);
+    }
+  };
+
   const updateDayHours = (
     dayId: (typeof WEEKDAYS)[number]['id'],
     update: (day: ReturnType<typeof getWeeklyHours>[number]) => ReturnType<typeof getWeeklyHours>[number]
@@ -199,7 +231,11 @@ export function AdminDashboard() {
     try {
       await api.updateEnquiryStatus(id, status, notes);
       setEnquiries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, status, internalNotes: notes ?? e.internalNotes } : e))
+        prev.flatMap((enquiry) => {
+          if (enquiry.id !== id) return [enquiry];
+          if (enquiryStatusFilter !== 'all' && status !== enquiryStatusFilter) return [];
+          return [{ ...enquiry, status, internalNotes: notes ?? enquiry.internalNotes }];
+        })
       );
       showFeedback('success', `Enquiry status updated to ${status}`);
       // Refresh stats
@@ -682,13 +718,13 @@ export function AdminDashboard() {
               </button>
             </div>
 
-            {enquiries.length === 0 ? (
+            {!stats?.recentEnquiries.length ? (
               <div className="text-center py-8 text-slate-400 text-xs">
                 No patient enquiries yet. Submitted forms will appear here in real-time.
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {enquiries.slice(0, 5).map((enq) => (
+                {stats.recentEnquiries.map((enq) => (
                   <div key={enq.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -727,7 +763,7 @@ export function AdminDashboard() {
                         <span>{enq.phoneNumber}</span>
                       </a>
                       <a
-                        href={`https://wa.me/91${enq.phoneNumber}?text=${encodeURIComponent(`Namaste ${enq.patientName}! Main Orthocare Clinic se baat kar raha hoon aapki ${enq.serviceRequested} appointment ke sambhandh me.`)}`}
+                        href={`https://wa.me/91${enq.phoneNumber}?text=${encodeURIComponent('Namaste! Main Orthocare Clinic se aapki appointment request ke sambandh mein sampark kar raha hoon.')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs"
@@ -760,7 +796,8 @@ export function AdminDashboard() {
               {['all', 'new', 'contacted', 'scheduled', 'completed', 'closed'].map((status) => (
                 <button
                   key={status}
-                  onClick={() => setEnquiryStatusFilter(status)}
+                  disabled={isLoadingEnquiriesPage}
+                  onClick={() => void changeEnquiryFilter(status)}
                   className={`px-3 py-1.5 rounded-lg capitalize transition-colors ${
                     enquiryStatusFilter === status ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -829,7 +866,7 @@ export function AdminDashboard() {
                       </a>
 
                       <a
-                        href={`https://wa.me/91${enq.phoneNumber}?text=${encodeURIComponent(`Namaste ${enq.patientName}! Orthocare Clinic (Dr. Harshit Jain) se aapki appointment request ke baare me baat karne ke liye message kar rahe hain.`)}`}
+                        href={`https://wa.me/91${enq.phoneNumber}?text=${encodeURIComponent('Namaste! Orthocare Clinic se aapki appointment request ke sambandh mein sampark kar rahe hain.')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 text-white font-semibold text-xs hover:bg-emerald-700"
@@ -881,6 +918,18 @@ export function AdminDashboard() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {enquiriesCursor && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                disabled={isLoadingEnquiriesPage}
+                onClick={() => void loadMoreEnquiries()}
+                className="min-h-11 rounded-xl border border-slate-300 bg-white px-5 py-2 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {isLoadingEnquiriesPage ? 'Loading…' : 'Load older enquiries'}
+              </button>
             </div>
           )}
         </div>

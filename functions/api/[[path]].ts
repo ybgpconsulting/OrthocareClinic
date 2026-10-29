@@ -82,6 +82,9 @@ const SESSION_COOKIE_NAME = '__Host-orthocare_admin';
 const MAX_JSON_BYTES = 512 * 1024;
 const ENQUIRY_WINDOW_MS = 15 * 60 * 1000;
 const ENQUIRY_MAX_SUBMISSIONS = 5;
+const LEGACY_PASSWORD_HASH_ITERATIONS = 10_000;
+const ENQUIRY_PAGE_SIZE = 50;
+const MAX_ENQUIRY_PAGE_SIZE = 100;
 
 class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -113,6 +116,12 @@ function randomHex(bytes: number): string {
   return toHex(value);
 }
 
+function copyArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(value.length);
+  copy.set(value);
+  return copy.buffer;
+}
+
 function normalizeDatabase(value: unknown): ClinicDatabase {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('D1 clinic state is invalid.');
@@ -131,7 +140,12 @@ function normalizeDatabase(value: unknown): ClinicDatabase {
   } as ClinicDatabase;
 }
 
-async function hashPassword(password: string, salt: string): Promise<string> {
+async function derivePasswordHash(
+  password: string,
+  salt: Uint8Array,
+  iterations: number,
+  hash: 'SHA-256' | 'SHA-512'
+): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(password),
@@ -142,14 +156,55 @@ async function hashPassword(password: string, salt: string): Promise<string> {
   const bits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
-      salt: new Uint8Array(fromHex(salt)),
-      iterations: 10_000,
-      hash: 'SHA-512',
+      salt: copyArrayBuffer(salt),
+      iterations,
+      hash,
     },
     key,
-    512
+    hash === 'SHA-512' ? 512 : 256
   );
   return toHex(new Uint8Array(bits));
+}
+
+async function hashPassword(password: string, salt: string): Promise<string> {
+  return derivePasswordHash(
+    password,
+    fromHex(salt),
+    LEGACY_PASSWORD_HASH_ITERATIONS,
+    'SHA-512'
+  );
+}
+
+async function verifyPassword(
+  password: string,
+  salt: string,
+  storedHash: string
+): Promise<{ matches: boolean }> {
+  if (!/^[0-9a-f]{32}$/i.test(salt)) {
+    throw new Error('D1 administrator password salt has an invalid format.');
+  }
+  if (!/^[0-9a-f]{128}$/i.test(storedHash)) {
+    throw new Error('D1 administrator password hash uses an unsupported format.');
+  }
+
+  const expected = fromHex(storedHash);
+  const [hexSaltCandidate, textSaltCandidate] = await Promise.all([
+    derivePasswordHash(
+      password,
+      fromHex(salt),
+      LEGACY_PASSWORD_HASH_ITERATIONS,
+      'SHA-512'
+    ),
+    derivePasswordHash(
+      password,
+      new TextEncoder().encode(salt),
+      LEGACY_PASSWORD_HASH_ITERATIONS,
+      'SHA-512'
+    ),
+  ]);
+  const matchesHexSalt = constantTimeEqual(fromHex(hexSaltCandidate), expected);
+  const matchesTextSalt = constantTimeEqual(fromHex(textSaltCandidate), expected);
+  return { matches: matchesHexSalt || matchesTextSalt };
 }
 
 function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
@@ -238,7 +293,7 @@ async function ensureState(env: Env): Promise<void> {
 
   const password = env.ADMIN_INITIAL_PASSWORD;
   if (!password || getAdminPasswordPolicyError(password)) {
-    throw new Error('Set ADMIN_INITIAL_PASSWORD as a Cloudflare Pages secret (12-128 characters) before initializing D1.');
+    throw new Error('Set ADMIN_INITIAL_PASSWORD as a Cloudflare Pages secret (15-128 characters) before initializing D1.');
   }
 
   const salt = randomHex(16);
@@ -415,6 +470,26 @@ async function getLoginRetryAfter(env: Env, ipHash: string): Promise<number> {
   return attempt ? Math.max(0, Math.ceil((Number(attempt.locked_until) - Date.now()) / 1000)) : 0;
 }
 
+async function cleanupExpiredSecurityRecords(env: Env): Promise<void> {
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM orthocare_clinic_sessions
+      WHERE rowid IN (
+        SELECT rowid FROM orthocare_clinic_sessions WHERE expires_at <= ? LIMIT 100
+      )`).bind(now),
+    env.DB.prepare(`DELETE FROM orthocare_clinic_login_attempts
+      WHERE rowid IN (
+        SELECT rowid FROM orthocare_clinic_login_attempts
+        WHERE window_started_at < ? AND locked_until <= ? LIMIT 100
+      )`).bind(now - LOGIN_WINDOW_MS * 2, now),
+    env.DB.prepare(`DELETE FROM orthocare_clinic_enquiry_attempts
+      WHERE rowid IN (
+        SELECT rowid FROM orthocare_clinic_enquiry_attempts
+        WHERE window_started_at < ? LIMIT 100
+      )`).bind(now - ENQUIRY_WINDOW_MS * 2),
+  ]);
+}
+
 async function recordLoginFailure(env: Env, ipHash: string): Promise<number> {
   const now = Date.now();
   await env.DB
@@ -534,6 +609,9 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 
   if (method === 'OPTIONS') return new Response(null, { status: 204 });
   const origin = request.headers.get('origin');
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !origin) {
+    return json({ error: 'An Origin header is required for API mutations.' }, 403);
+  }
   if (origin) {
     try {
       if (new URL(origin).origin !== url.origin) {
@@ -545,6 +623,23 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   }
 
   if (resource === 'health' && method === 'GET') {
+    const schema = await env.DB
+      .prepare(`SELECT COUNT(*) AS table_count FROM sqlite_master
+        WHERE type = 'table' AND name IN (
+          'orthocare_clinic_state',
+          'orthocare_clinic_sessions',
+          'orthocare_clinic_login_attempts',
+          'orthocare_clinic_documents',
+          'orthocare_clinic_records',
+          'orthocare_clinic_enquiries',
+          'orthocare_clinic_admin',
+          'orthocare_clinic_data_meta',
+          'orthocare_clinic_enquiry_attempts'
+        )`)
+      .first<{ table_count: number }>();
+    if (Number(schema?.table_count) !== 9) {
+      return json({ status: 'unavailable' }, 503);
+    }
     return json({ status: 'ok', time: new Date().toISOString() });
   }
 
@@ -562,11 +657,15 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       );
     }
     await ensureState(env);
+    await cleanupExpiredSecurityRecords(env);
     const credentials = await readAdminCredentials(env);
     if (!credentials) throw new Error('D1 administrator credentials are unavailable.');
-    const actual = fromHex(await hashPassword(body.password, credentials.password_salt));
-    const expected = fromHex(credentials.password_hash);
-    if (!constantTimeEqual(actual, expected)) {
+    const verification = await verifyPassword(
+      body.password,
+      credentials.password_salt,
+      credentials.password_hash
+    );
+    if (!verification.matches) {
       const failureRetryAfter = await recordLoginFailure(env, loginKey);
       if (failureRetryAfter > 0) {
         return json(
@@ -581,15 +680,13 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
         withPrivateHeaders()
       );
     }
-    await env.DB
-      .prepare('DELETE FROM orthocare_clinic_login_attempts WHERE ip_hash = ?')
-      .bind(loginKey)
-      .run();
     const sessionToken = randomHex(32);
-    await env.DB
-      .prepare('INSERT INTO orthocare_clinic_sessions (token_hash, expires_at) VALUES (?, ?)')
-      .bind(await hashToken(sessionToken), Date.now() + SESSION_TTL_SECONDS * 1000)
-      .run();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM orthocare_clinic_login_attempts WHERE ip_hash = ?')
+        .bind(loginKey),
+      env.DB.prepare('INSERT INTO orthocare_clinic_sessions (token_hash, expires_at) VALUES (?, ?)')
+        .bind(await hashToken(sessionToken), Date.now() + SESSION_TTL_SECONDS * 1000),
+    ]);
     return json(
       { success: true, message: 'Logged in successfully' },
       200,
@@ -655,20 +752,29 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     }
     const credentials = await readAdminCredentials(env);
     if (!credentials) throw new Error('D1 administrator credentials are unavailable.');
-    const currentHash = await hashPassword(body.currentPassword, credentials.password_salt);
-    if (!constantTimeEqual(fromHex(currentHash), fromHex(credentials.password_hash))) {
+    const currentPassword = await verifyPassword(
+      body.currentPassword,
+      credentials.password_salt,
+      credentials.password_hash
+    );
+    if (!currentPassword.matches) {
       return json({ error: 'Current password was incorrect' }, 400);
     }
     const salt = randomHex(16);
     const passwordHash = await hashPassword(body.newPassword, salt);
-    const update = await env.DB
-      .prepare('UPDATE orthocare_clinic_admin SET password_salt = ?, password_hash = ? WHERE id = 1 AND password_salt = ? AND password_hash = ?')
-      .bind(salt, passwordHash, credentials.password_salt, credentials.password_hash)
-      .run();
-    if ((update.meta?.changes || 0) !== 1) {
+    const results = await env.DB.batch([
+      env.DB.prepare(`UPDATE orthocare_clinic_admin SET password_salt = ?, password_hash = ?
+        WHERE id = 1 AND password_salt = ? AND password_hash = ?`)
+        .bind(salt, passwordHash, credentials.password_salt, credentials.password_hash),
+      env.DB.prepare(`DELETE FROM orthocare_clinic_sessions
+        WHERE EXISTS (
+          SELECT 1 FROM orthocare_clinic_admin WHERE id = 1 AND password_salt = ? AND password_hash = ?
+        )`)
+        .bind(salt, passwordHash),
+    ]);
+    if ((results[0]?.meta?.changes || 0) !== 1) {
       return json({ error: 'Administrator credentials changed concurrently. Please retry.' }, 409);
     }
-    await env.DB.prepare('DELETE FROM orthocare_clinic_sessions').run();
     return json(
       { success: true, message: 'Admin password updated successfully. Please sign in again.' },
       200,
@@ -748,20 +854,29 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (validationError) return json({ error: validationError }, 400);
     const deleted = await mutateDatabase(env, (database) => {
       const index = database.categories.findIndex((item) => item.id === id);
-      if (index < 0) return false;
-      const fallbackId =
-        body.fallbackCategoryId ||
-        database.categories.find((item) => item.id !== id)?.id ||
-        'cat-general';
-      database.services = database.services.map((service) =>
-        service.categoryId === id ? { ...service, categoryId: fallbackId } : service
-      );
+      if (index < 0) return null;
+      const remainingCategories = database.categories.filter((item) => item.id !== id);
+      const fallbackId = body.fallbackCategoryId || remainingCategories[0]?.id;
+      if (
+        (body.fallbackCategoryId && !remainingCategories.some((item) => item.id === fallbackId)) ||
+        (database.services.some((service) => service.categoryId === id) &&
+          !remainingCategories.some((item) => item.id === fallbackId))
+      ) {
+        return false;
+      }
+      if (fallbackId) {
+        database.services = database.services.map((service) =>
+          service.categoryId === id ? { ...service, categoryId: fallbackId } : service
+        );
+      }
       database.categories.splice(index, 1);
       return true;
     });
-    return deleted
-      ? json({ success: true, message: 'Category deleted and services safely reassigned' })
-      : json({ error: 'Category not found' }, 404);
+    if (deleted === null) return json({ error: 'Category not found' }, 404);
+    if (deleted === false) {
+      return json({ error: 'Choose an existing category before deleting this category.' }, 400);
+    }
+    return json({ success: true, message: 'Category deleted and services safely reassigned' });
   }
 
   if (resource === 'services' && method === 'POST') {
@@ -769,6 +884,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const validationError = validatePayload(body, serviceRules, ['name', 'categoryId', 'description']);
     if (validationError) return json({ error: validationError }, 400);
     const created = await mutateDatabase(env, (database) => {
+      if (!database.categories.some((category) => category.id === body.categoryId)) return false;
       const item: TreatmentService = {
         id: getId('srv'),
         name: body.name,
@@ -789,6 +905,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       database.services.push(item);
       return item;
     });
+    if (created === false) return json({ error: 'The selected service category does not exist.' }, 400);
     return json(created, 201);
   }
   if (resource === 'services' && id && method === 'PUT') {
@@ -798,9 +915,16 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const updated = await mutateDatabase(env, (database) => {
       const index = database.services.findIndex((item) => item.id === id);
       if (index < 0) return null;
+      if (
+        body.categoryId !== undefined &&
+        !database.categories.some((category) => category.id === body.categoryId)
+      ) {
+        return false;
+      }
       database.services[index] = { ...database.services[index], ...body, id };
       return database.services[index];
     });
+    if (updated === false) return json({ error: 'The selected service category does not exist.' }, 400);
     return updated ? json(updated) : json({ error: 'Service not found' }, 404);
   }
   if (resource === 'services' && id && method === 'DELETE') {
@@ -924,6 +1048,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
         withPrivateHeaders({ 'Retry-After': String(rateLimitRetryAfter) })
       );
     }
+    await cleanupExpiredSecurityRecords(env);
     const now = new Date().toISOString();
     const enquiry: PatientEnquiry = {
       id: getId('enq'),
@@ -964,10 +1089,59 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     }, 201);
   }
   if (resource === 'enquiries' && method === 'GET') {
+    const hasPagination = ['limit', 'status', 'cursorCreatedAt', 'cursorId']
+      .some((key) => url.searchParams.has(key));
+    const rawLimit = url.searchParams.get('limit');
+    const limit = rawLimit === null
+      ? (hasPagination ? ENQUIRY_PAGE_SIZE : MAX_ENQUIRY_PAGE_SIZE)
+      : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ENQUIRY_PAGE_SIZE) {
+      return json({ error: `Page size must be between 1 and ${MAX_ENQUIRY_PAGE_SIZE}.` }, 400);
+    }
+
+    const status = url.searchParams.get('status') || 'all';
+    const allowedStatuses = ['all', 'new', 'contacted', 'scheduled', 'completed', 'closed'];
+    if (!allowedStatuses.includes(status)) return json({ error: 'A valid enquiry status is required.' }, 400);
+
+    const hasCursorCreatedAt = url.searchParams.has('cursorCreatedAt');
+    const hasCursorId = url.searchParams.has('cursorId');
+    const cursorCreatedAt = url.searchParams.get('cursorCreatedAt');
+    const cursorId = url.searchParams.get('cursorId');
+    if (
+      hasCursorCreatedAt !== hasCursorId ||
+      (cursorCreatedAt !== null && cursorCreatedAt.length > 64) ||
+      (cursorId !== null && (cursorId.length < 1 || cursorId.length > 160))
+    ) {
+      return json({ error: 'The enquiry page cursor is invalid.' }, 400);
+    }
+
+    const filters: string[] = [];
+    const values: unknown[] = [];
+    if (status !== 'all') {
+      filters.push('status = ?');
+      values.push(status);
+    }
+    if (cursorCreatedAt !== null && cursorId !== null) {
+      filters.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      values.push(cursorCreatedAt, cursorCreatedAt, cursorId);
+    }
+    const where = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
     const result = await env.DB
-      .prepare('SELECT * FROM orthocare_clinic_enquiries ORDER BY created_at DESC, id DESC')
+      .prepare(`SELECT * FROM orthocare_clinic_enquiries ${where}
+        ORDER BY created_at DESC, id DESC LIMIT ?`)
+      .bind(...values, limit + 1)
       .all<StoredEnquiry>();
-    return json((result.results || []).map(mapEnquiry));
+    const rows = result.results || [];
+    const items = rows.slice(0, limit).map(mapEnquiry);
+    if (!hasPagination) return json(items);
+
+    const lastItem = items[items.length - 1];
+    return json({
+      items,
+      nextCursor: rows.length > limit && lastItem
+        ? { createdAt: lastItem.createdAt || '', id: lastItem.id }
+        : null,
+    });
   }
   if (resource === 'enquiries' && id && method === 'PATCH') {
     const body = await readBody(request);
@@ -1042,11 +1216,23 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 }
 
 export async function onRequest({ request, env }: { request: Request; env: Env }): Promise<Response> {
+  let response: Response;
   try {
-    return await handleApi(request, env);
+    response = await handleApi(request, env);
   } catch (error) {
     console.error('Cloudflare API request failed:', error);
-    if (error instanceof ApiError) return json({ error: error.message }, error.status);
-    return json({ error: 'The request could not be completed. Please try again.' }, 500);
+    response = error instanceof ApiError
+      ? json({ error: error.message }, error.status)
+      : json({ error: 'The request could not be completed. Please try again.' }, 500);
   }
+
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', 'no-store');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }

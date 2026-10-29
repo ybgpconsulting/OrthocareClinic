@@ -359,10 +359,10 @@ export function ContactPage() {
             src={settings?.googleMapsEmbedUrl || 'https://www.google.com/maps?q=X72C%2BRQ%2C%20Baghpat%2C%20Uttar%20Pradesh&output=embed'}
             width="100%"
             height="100%"
-            style={{ border: 0 }}
+            className="border-0"
             allowFullScreen={false}
             loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
+            referrerPolicy="strict-origin-when-cross-origin"
           />
         </div>
       </div>

@@ -32,6 +32,13 @@ const ADMIN_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 app.use(express.json({ limit: '512kb' }));
 app.use(express.urlencoded({ extended: true, limit: '512kb' }));
 
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use((req, res, next) => {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) || !req.path.startsWith('/api/')) {
     next();
@@ -39,7 +46,7 @@ app.use((req, res, next) => {
   }
   const origin = req.get('origin');
   if (!origin) {
-    next();
+    res.status(403).json({ error: 'An Origin header is required for API mutations.' });
     return;
   }
   try {
@@ -425,8 +432,55 @@ app.post('/api/enquiries', asyncHandler(async (req, res) => {
   });
 }));
 
-app.get('/api/enquiries', requireAdmin, asyncHandler(async (_req, res) => {
-  res.json(await DataStore.getEnquiries());
+app.get('/api/enquiries', requireAdmin, asyncHandler(async (req, res) => {
+  const hasPagination = ['limit', 'status', 'cursorCreatedAt', 'cursorId']
+    .some((key) => Object.prototype.hasOwnProperty.call(req.query, key));
+  const rawLimit = typeof req.query.limit === 'string' ? req.query.limit : undefined;
+  const limit = rawLimit === undefined
+    ? (hasPagination ? 50 : 100)
+    : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return res.status(400).json({ error: 'Page size must be between 1 and 100.' });
+  }
+
+  const status = typeof req.query.status === 'string' ? req.query.status : 'all';
+  const allowedStatuses = ['all', 'new', 'contacted', 'scheduled', 'completed', 'closed'];
+  if (!allowedStatuses.includes(status)) {
+    return res.status(400).json({ error: 'A valid enquiry status is required.' });
+  }
+  const cursorCreatedAt = typeof req.query.cursorCreatedAt === 'string' ? req.query.cursorCreatedAt : null;
+  const cursorId = typeof req.query.cursorId === 'string' ? req.query.cursorId : null;
+  if (
+    Object.prototype.hasOwnProperty.call(req.query, 'cursorCreatedAt') !==
+      Object.prototype.hasOwnProperty.call(req.query, 'cursorId') ||
+    (cursorCreatedAt !== null && cursorCreatedAt.length > 64) ||
+    (cursorId !== null && (cursorId.length < 1 || cursorId.length > 160))
+  ) {
+    return res.status(400).json({ error: 'The enquiry page cursor is invalid.' });
+  }
+
+  let enquiries = await DataStore.getEnquiries();
+  if (status !== 'all') enquiries = enquiries.filter((enquiry) => enquiry.status === status);
+  enquiries.sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+  );
+  if (cursorCreatedAt !== null && cursorId !== null) {
+    const cursorIndex = enquiries.findIndex((enquiry) =>
+      enquiry.createdAt < cursorCreatedAt ||
+      (enquiry.createdAt === cursorCreatedAt && enquiry.id < cursorId)
+    );
+    enquiries = cursorIndex < 0 ? [] : enquiries.slice(cursorIndex);
+  }
+
+  const items = enquiries.slice(0, limit);
+  if (!hasPagination) return res.json(items);
+  const lastItem = items[items.length - 1];
+  return res.json({
+    items,
+    nextCursor: enquiries.length > limit && lastItem
+      ? { createdAt: lastItem.createdAt || '', id: lastItem.id }
+      : null,
+  });
 }));
 
 app.patch('/api/enquiries/:id', requireAdmin, asyncHandler(async (req, res) => {

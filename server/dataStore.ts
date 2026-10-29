@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { ClinicDatabase, PatientEnquiry, ServiceCategory, TreatmentService, GalleryItem, FAQItem } from './types';
-import { defaultDatabase, hashPassword, generateSalt } from './seedData';
+import { defaultDatabase, hashPassword, generateSalt, verifyPasswordHash } from './seedData';
 import { D1Config, getD1Config, queryD1 } from './d1Client';
 import { getAdminPasswordPolicyError } from '../src/authPolicy';
 
@@ -54,7 +54,7 @@ function loadLocalDatabase(): ClinicDatabase {
 
   const initialAdminPassword = process.env.ADMIN_INITIAL_PASSWORD;
   if (!initialAdminPassword || getAdminPasswordPolicyError(initialAdminPassword)) {
-    throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 12 and 128 characters before creating a new clinic database.');
+    throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 15 and 128 characters before creating a new clinic database.');
   }
 
   saveLocalDatabase(defaultDatabase);
@@ -90,9 +90,7 @@ function hashSessionToken(token: string): string {
 }
 
 function isPasswordMatch(candidate: string, salt: string, expectedHash: string): boolean {
-  const candidateHash = Buffer.from(hashPassword(candidate, salt), 'hex');
-  const expected = Buffer.from(expectedHash, 'hex');
-  return candidateHash.length === expected.length && timingSafeEqual(candidateHash, expected);
+  return verifyPasswordHash(candidate, salt, expectedHash).matches;
 }
 
 async function readRemoteState(): Promise<{ revision: number; database: ClinicDatabase } | null> {
@@ -176,7 +174,7 @@ export const DataStore = {
     if (!current) {
       const password = process.env.ADMIN_INITIAL_PASSWORD;
       if (!password || getAdminPasswordPolicyError(password)) {
-        throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 12 and 128 characters before initializing the Cloudflare D1 database.');
+        throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 15 and 128 characters before initializing the Cloudflare D1 database.');
       }
 
       const salt = generateSalt();

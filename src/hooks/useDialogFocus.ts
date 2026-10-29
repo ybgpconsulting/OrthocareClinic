@@ -19,12 +19,12 @@ export function useDialogFocus(
     if (!dialog) return;
 
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
+    const hadScrollLockClass = document.body.classList.contains('overflow-hidden');
     const getFocusableElements = () =>
       Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
         .filter((element) => element.getClientRects().length > 0);
 
-    document.body.style.overflow = 'hidden';
+    document.body.classList.add('overflow-hidden');
     const preferredFocus = initialFocusSelector
       ? dialog.querySelector<HTMLElement>(initialFocusSelector)
       : null;
@@ -56,7 +56,7 @@ export function useDialogFocus(
 
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      if (!hadScrollLockClass) document.body.classList.remove('overflow-hidden');
       document.removeEventListener('keydown', handleKeyDown);
       if (previousFocus?.isConnected) previousFocus.focus();
     };

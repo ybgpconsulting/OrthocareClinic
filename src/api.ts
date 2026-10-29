@@ -1,4 +1,15 @@
-import { ClinicSettings, ClinicContent, ServiceCategory, TreatmentService, GalleryItem, FAQItem, PatientEnquiry, AdminStats } from './types';
+import {
+  ClinicSettings,
+  ClinicContent,
+  ServiceCategory,
+  TreatmentService,
+  GalleryItem,
+  FAQItem,
+  PatientEnquiry,
+  EnquiryCursor,
+  EnquiryPage,
+  AdminStats,
+} from './types';
 import { getAdminPasswordPolicyError } from './authPolicy';
 
 function withoutId(value: object): object {
@@ -285,6 +296,18 @@ export const api = {
     const res = await fetch('/api/enquiries', { headers: this.getHeaders(), credentials: 'same-origin' });
     if (!res.ok) throw await responseError(res, 'Failed to fetch enquiries');
     return res.json();
+  },
+
+  async getEnquiriesPage(status = 'all', cursor?: EnquiryCursor): Promise<EnquiryPage> {
+    const params = new URLSearchParams({ limit: '50', status });
+    if (cursor) {
+      params.set('cursorCreatedAt', cursor.createdAt);
+      params.set('cursorId', cursor.id);
+    }
+    return readJson<EnquiryPage>(`/api/enquiries?${params}`, {
+      headers: this.getHeaders(),
+      credentials: 'same-origin',
+    });
   },
 
   async updateEnquiryStatus(id: string, status: PatientEnquiry['status'], internalNotes?: string): Promise<PatientEnquiry> {

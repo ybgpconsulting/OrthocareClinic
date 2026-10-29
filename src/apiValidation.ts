@@ -37,20 +37,40 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function validateWeeklyHours(value: unknown): boolean {
   if (!Array.isArray(value) || value.length > 7) return false;
   const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const seenWeekdays = new Set<string>();
 
   return value.every((day) => {
     if (!isPlainObject(day)) return false;
     if (Object.keys(day).some((key) => !['day', 'isClosed', 'intervals', 'note'].includes(key))) return false;
     if (!isEnum(weekdays)(day.day) || !isBoolean(day.isClosed)) return false;
+    if (seenWeekdays.has(day.day as string)) return false;
+    seenWeekdays.add(day.day as string);
     if (!isOptionalString(200)(day.note)) return false;
     if (!Array.isArray(day.intervals) || day.intervals.length > 2) return false;
-    return day.intervals.every((interval) =>
-      isPlainObject(interval) &&
-      Object.keys(interval).every((key) => key === 'open' || key === 'close') &&
-      typeof interval.open === 'string' &&
-      /^([01]\d|2[0-3]):[0-5]\d$/.test(interval.open) &&
-      typeof interval.close === 'string' &&
-      /^([01]\d|2[0-3]):[0-5]\d$/.test(interval.close)
+    if (day.isClosed) return day.intervals.length === 0;
+    if (day.intervals.length === 0) return false;
+
+    const intervals: Array<{ start: number; end: number }> = [];
+    for (const interval of day.intervals) {
+      if (
+        !isPlainObject(interval) ||
+        Object.keys(interval).some((key) => key !== 'open' && key !== 'close') ||
+        typeof interval.open !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(interval.open) ||
+        typeof interval.close !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(interval.close)
+      ) {
+        return false;
+      }
+      const start = Number(interval.open.replace(':', ''));
+      const end = Number(interval.close.replace(':', ''));
+      if (end <= start) return false;
+      intervals.push({ start, end });
+    }
+
+    intervals.sort((left, right) => left.start - right.start);
+    return intervals.every((interval, index) =>
+      index === 0 || interval.start >= intervals[index - 1].end
     );
   });
 }
