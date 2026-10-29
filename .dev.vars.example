@@ -1,0 +1,3 @@
+# Copy this file to .dev.vars for local Cloudflare Pages Functions testing.
+# Use a disposable local-only password; never commit the copied .dev.vars file.
+ADMIN_INITIAL_PASSWORD="replace-with-a-local-test-password"

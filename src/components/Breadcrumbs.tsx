@@ -1,5 +1,5 @@
 import React from 'react';
-import { useClinic } from '../context/ClinicContext';
+import { useClinic, VIEW_PATHS } from '../context/ClinicContext';
 import { ChevronRight, Home, ArrowLeft } from 'lucide-react';
 
 interface BreadcrumbProps {
@@ -37,13 +37,17 @@ export function Breadcrumbs({ customTitle, parentView }: BreadcrumbProps) {
             <ol className="flex items-center gap-1.5 sm:gap-2 text-xs text-slate-500 font-medium whitespace-nowrap">
               {/* Home Link */}
               <li className="flex items-center">
-                <button
-                  onClick={() => setActiveView('home')}
+                <a
+                  href={VIEW_PATHS.home}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setActiveView('home');
+                  }}
                   className="flex items-center gap-1 text-slate-600 hover:text-blue-900 transition-colors cursor-pointer"
                 >
                   <Home className="w-3.5 h-3.5 text-blue-900" />
                   <span className="hover:underline">{homeLabel}</span>
-                </button>
+                </a>
               </li>
 
               <li aria-hidden="true" className="text-slate-400">
@@ -54,12 +58,16 @@ export function Breadcrumbs({ customTitle, parentView }: BreadcrumbProps) {
               {parentView && (
                 <>
                   <li className="flex items-center">
-                    <button
-                      onClick={() => setActiveView(parentView.id)}
+                    <a
+                      href={VIEW_PATHS[parentView.id] || '/'}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setActiveView(parentView.id);
+                      }}
                       className="text-slate-600 hover:text-blue-900 hover:underline transition-colors cursor-pointer"
                     >
                       {parentView.label}
-                    </button>
+                    </a>
                   </li>
                   <li aria-hidden="true" className="text-slate-400">
                     <ChevronRight className="w-3.5 h-3.5" />

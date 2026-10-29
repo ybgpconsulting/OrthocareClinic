@@ -1,14 +1,15 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { ClinicDatabase, PatientEnquiry, ServiceCategory, TreatmentService, GalleryItem, FAQItem } from './types';
 import { defaultDatabase, hashPassword, generateSalt } from './seedData';
+import { D1Config, getD1Config, queryD1 } from './d1Client';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'clinic_data.json');
 const UPLOAD_DIR = path.resolve(process.cwd(), 'public', 'uploads');
+const MAX_WRITE_ATTEMPTS = 5;
 
-// Ensure directories exist
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -16,206 +17,327 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
-let inMemoryDb: ClinicDatabase;
+let d1Config: D1Config | null = null;
+let inMemoryDb: ClinicDatabase = defaultDatabase;
+const activeSessions = new Map<string, { expiresAt: number }>();
 
-function loadDatabase(): ClinicDatabase {
+function normalizeDatabase(parsed: Partial<ClinicDatabase>): ClinicDatabase {
+  return {
+    ...defaultDatabase,
+    ...parsed,
+    settings: { ...defaultDatabase.settings, ...(parsed.settings || {}) },
+    content: { ...defaultDatabase.content, ...(parsed.content || {}) },
+    categories: Array.isArray(parsed.categories) ? parsed.categories : defaultDatabase.categories,
+    services: Array.isArray(parsed.services) ? parsed.services : defaultDatabase.services,
+    gallery: Array.isArray(parsed.gallery) ? parsed.gallery : defaultDatabase.gallery,
+    faqs: Array.isArray(parsed.faqs) ? parsed.faqs : defaultDatabase.faqs,
+    enquiries: Array.isArray(parsed.enquiries) ? parsed.enquiries : [],
+  };
+}
+
+function loadLocalDatabase(): ClinicDatabase {
   try {
     if (fs.existsSync(DATA_FILE)) {
-      const content = fs.readFileSync(DATA_FILE, 'utf-8');
-      const parsed = JSON.parse(content) as ClinicDatabase;
-      
-      // Ensure all required top-level collections exist
-      return {
-        ...defaultDatabase,
-        ...parsed,
-        settings: { ...defaultDatabase.settings, ...(parsed.settings || {}) },
-        content: { ...defaultDatabase.content, ...(parsed.content || {}) },
-        categories: parsed.categories?.length ? parsed.categories : defaultDatabase.categories,
-        services: parsed.services?.length ? parsed.services : defaultDatabase.services,
-        gallery: parsed.gallery?.length ? parsed.gallery : defaultDatabase.gallery,
-        faqs: parsed.faqs?.length ? parsed.faqs : defaultDatabase.faqs,
-        enquiries: Array.isArray(parsed.enquiries) ? parsed.enquiries : []
-      };
+      return normalizeDatabase(JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) as Partial<ClinicDatabase>);
     }
-  } catch (err) {
-    console.error('Failed to read clinic_data.json, falling back to default:', err);
+  } catch (error) {
+    console.error('Failed to read clinic_data.json:', error);
+    throw new Error('The local clinic database could not be read.');
   }
-  
+
   const initialAdminPassword = process.env.ADMIN_INITIAL_PASSWORD;
   if (!initialAdminPassword || initialAdminPassword.length < 12) {
     throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password of at least 12 characters before creating a new clinic database.');
   }
 
-  // Write initial seed
-  saveDatabase(defaultDatabase);
+  saveLocalDatabase(defaultDatabase);
   return { ...defaultDatabase };
 }
 
-function saveDatabase(db: ClinicDatabase): void {
+function saveLocalDatabase(db: ClinicDatabase): void {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), 'utf-8');
+}
+
+function parseRemoteDatabase(data: string): ClinicDatabase {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to save clinic_data.json:', err);
+    const parsed: unknown = JSON.parse(data);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid clinic state shape.');
+    }
+    const database = parsed as Partial<ClinicDatabase>;
+    if (typeof database.adminSalt !== 'string' || typeof database.adminPasswordHash !== 'string') {
+      throw new Error('Clinic administrator credentials are missing from D1 state.');
+    }
+    return normalizeDatabase(database);
+  } catch {
+    throw new Error('The clinic state stored in Cloudflare D1 is invalid or incomplete.');
   }
 }
 
-inMemoryDb = loadDatabase();
+function getId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${randomBytes(3).toString('hex')}`;
+}
 
-// Active admin sessions: token -> { createdAt: number, expiresAt: number }
-const activeSessions = new Map<string, { createdAt: number; expiresAt: number }>();
+function hashSessionToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function isPasswordMatch(candidate: string, salt: string, expectedHash: string): boolean {
+  const candidateHash = Buffer.from(hashPassword(candidate, salt), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  return candidateHash.length === expected.length && timingSafeEqual(candidateHash, expected);
+}
+
+async function readRemoteState(): Promise<{ revision: number; database: ClinicDatabase } | null> {
+  if (!d1Config) throw new Error('Cloudflare D1 is not configured.');
+  const { results } = await queryD1<{ revision: number; data: string }>(
+    d1Config,
+    'SELECT revision, data FROM orthocare_clinic_state WHERE id = 1'
+  );
+  const row = results[0];
+  return row ? { revision: Number(row.revision), database: parseRemoteDatabase(row.data) } : null;
+}
+
+async function mutateDatabase<T>(mutator: (database: ClinicDatabase) => T): Promise<T> {
+  if (!d1Config) {
+    const database = JSON.parse(JSON.stringify(inMemoryDb)) as ClinicDatabase;
+    const result = mutator(database);
+    if (result === null || result === false) return result;
+    saveLocalDatabase(database);
+    inMemoryDb = database;
+    return result;
+  }
+
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+    const current = await readRemoteState();
+    if (!current) throw new Error('Cloudflare D1 clinic state was not initialized.');
+    const database = current.database;
+    const result = mutator(database);
+    if (result === null || result === false) {
+      inMemoryDb = database;
+      return result;
+    }
+    const update = await queryD1(
+      d1Config,
+      'UPDATE orthocare_clinic_state SET revision = ?, data = ? WHERE id = 1 AND revision = ?',
+      [current.revision + 1, JSON.stringify(database), current.revision]
+    );
+    if (update.changes === 1) {
+      inMemoryDb = database;
+      return result;
+    }
+  }
+
+  throw new Error('Clinic data changed concurrently too many times. Please retry the request.');
+}
+
+async function readDatabase(): Promise<ClinicDatabase> {
+  if (!d1Config) return inMemoryDb;
+  const current = await readRemoteState();
+  if (!current) throw new Error('Cloudflare D1 clinic state was not initialized.');
+  inMemoryDb = current.database;
+  return current.database;
+}
 
 export const DataStore = {
-  get(): ClinicDatabase {
-    return inMemoryDb;
-  },
+  async initialize(): Promise<void> {
+    d1Config = getD1Config();
+    if (!d1Config) {
+      inMemoryDb = loadLocalDatabase();
+      console.log('Using local clinic_data.json storage.');
+      return;
+    }
 
-  updateSettings(settings: Partial<ClinicDatabase['settings']>): ClinicDatabase['settings'] {
-    inMemoryDb.settings = { ...inMemoryDb.settings, ...settings };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.settings;
-  },
+    await queryD1(
+      d1Config,
+      'CREATE TABLE IF NOT EXISTS orthocare_clinic_state (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, data TEXT NOT NULL)'
+    );
+    await queryD1(
+      d1Config,
+      'CREATE TABLE IF NOT EXISTS orthocare_clinic_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)'
+    );
 
-  updateContent(content: Partial<ClinicDatabase['content']>): ClinicDatabase['content'] {
-    inMemoryDb.content = { ...inMemoryDb.content, ...content };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.content;
-  },
-
-  // Categories
-  getCategories(): ServiceCategory[] {
-    return [...inMemoryDb.categories].sort((a, b) => a.order - b.order);
-  },
-
-  addCategory(category: Omit<ServiceCategory, 'id'>): ServiceCategory {
-    const id = `cat-${Date.now()}`;
-    const newCat: ServiceCategory = { ...category, id };
-    inMemoryDb.categories.push(newCat);
-    saveDatabase(inMemoryDb);
-    return newCat;
-  },
-
-  updateCategory(id: string, updates: Partial<ServiceCategory>): ServiceCategory | null {
-    const idx = inMemoryDb.categories.findIndex((c: ServiceCategory) => c.id === id);
-    if (idx === -1) return null;
-    inMemoryDb.categories[idx] = { ...inMemoryDb.categories[idx], ...updates, id };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.categories[idx];
-  },
-
-  deleteCategory(id: string, fallbackCategoryId?: string): boolean {
-    const idx = inMemoryDb.categories.findIndex((c: ServiceCategory) => c.id === id);
-    if (idx === -1) return false;
-
-    // Handle services assigned to this category
-    const targetCatId = fallbackCategoryId || inMemoryDb.categories.find((c: ServiceCategory) => c.id !== id)?.id || 'cat-general';
-    inMemoryDb.services = inMemoryDb.services.map((s: TreatmentService) => {
-      if (s.categoryId === id) {
-        return { ...s, categoryId: targetCatId };
+    let current = await readRemoteState();
+    if (!current) {
+      const password = process.env.ADMIN_INITIAL_PASSWORD;
+      if (!password || password.length < 12) {
+        throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password of at least 12 characters before initializing the Cloudflare D1 database.');
       }
-      return s;
+
+      const salt = generateSalt();
+      const seed: ClinicDatabase = {
+        ...defaultDatabase,
+        adminSalt: salt,
+        adminPasswordHash: hashPassword(password, salt),
+      };
+      await queryD1(
+        d1Config,
+        'INSERT OR IGNORE INTO orthocare_clinic_state (id, revision, data) VALUES (1, 1, ?)',
+        [JSON.stringify(seed)]
+      );
+      current = await readRemoteState();
+      if (!current) throw new Error('Cloudflare D1 database initialization did not create clinic state.');
+    }
+
+    inMemoryDb = current.database;
+    console.log(`Using Cloudflare D1 database ${process.env.CLOUDFLARE_D1_DATABASE_NAME || d1Config.databaseId}.`);
+  },
+
+  async get(): Promise<ClinicDatabase> {
+    return readDatabase();
+  },
+
+  async updateSettings(settings: Partial<ClinicDatabase['settings']>): Promise<ClinicDatabase['settings']> {
+    return mutateDatabase((database) => {
+      database.settings = { ...database.settings, ...settings };
+      return database.settings;
     });
-
-    inMemoryDb.categories.splice(idx, 1);
-    saveDatabase(inMemoryDb);
-    return true;
   },
 
-  // Services
-  getServices(all = false): TreatmentService[] {
-    const list = all ? inMemoryDb.services : inMemoryDb.services.filter((s: TreatmentService) => s.isVisible);
-    return [...list].sort((a, b) => a.order - b.order);
+  async updateContent(content: Partial<ClinicDatabase['content']>): Promise<ClinicDatabase['content']> {
+    return mutateDatabase((database) => {
+      database.content = { ...database.content, ...content };
+      return database.content;
+    });
   },
 
-  addService(service: Omit<TreatmentService, 'id'>): TreatmentService {
-    const id = `srv-${Date.now()}`;
-    const newService: TreatmentService = { ...service, id };
-    inMemoryDb.services.push(newService);
-    saveDatabase(inMemoryDb);
-    return newService;
+  async getCategories(): Promise<ServiceCategory[]> {
+    const database = await readDatabase();
+    return [...database.categories].sort((a, b) => a.order - b.order);
   },
 
-  updateService(id: string, updates: Partial<TreatmentService>): TreatmentService | null {
-    const idx = inMemoryDb.services.findIndex((s: TreatmentService) => s.id === id);
-    if (idx === -1) return null;
-    inMemoryDb.services[idx] = { ...inMemoryDb.services[idx], ...updates, id };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.services[idx];
+  async addCategory(category: Omit<ServiceCategory, 'id'>): Promise<ServiceCategory> {
+    return mutateDatabase((database) => {
+      const created = { ...category, id: getId('cat') };
+      database.categories.push(created);
+      return created;
+    });
   },
 
-  deleteService(id: string): boolean {
-    const idx = inMemoryDb.services.findIndex((s: TreatmentService) => s.id === id);
-    if (idx === -1) return false;
-    inMemoryDb.services.splice(idx, 1);
-    saveDatabase(inMemoryDb);
-    return true;
+  async updateCategory(id: string, updates: Partial<ServiceCategory>): Promise<ServiceCategory | null> {
+    return mutateDatabase((database) => {
+      const index = database.categories.findIndex((category) => category.id === id);
+      if (index === -1) return null;
+      database.categories[index] = { ...database.categories[index], ...updates, id };
+      return database.categories[index];
+    });
   },
 
-  // Gallery
-  getGallery(all = false): GalleryItem[] {
-    const list = all ? inMemoryDb.gallery : inMemoryDb.gallery.filter((g: GalleryItem) => g.isVisible);
-    return [...list].sort((a, b) => a.order - b.order);
+  async deleteCategory(id: string, fallbackCategoryId?: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      const index = database.categories.findIndex((category) => category.id === id);
+      if (index === -1) return false;
+      const targetId = fallbackCategoryId || database.categories.find((category) => category.id !== id)?.id || 'cat-general';
+      database.services = database.services.map((service) =>
+        service.categoryId === id ? { ...service, categoryId: targetId } : service
+      );
+      database.categories.splice(index, 1);
+      return true;
+    });
   },
 
-  addGalleryItem(item: Omit<GalleryItem, 'id'>): GalleryItem {
-    const id = `gal-${Date.now()}`;
-    const newItem: GalleryItem = { ...item, id };
-    inMemoryDb.gallery.push(newItem);
-    saveDatabase(inMemoryDb);
-    return newItem;
+  async getServices(all = false): Promise<TreatmentService[]> {
+    const database = await readDatabase();
+    const services = all ? database.services : database.services.filter((service) => service.isVisible);
+    return [...services].sort((a, b) => a.order - b.order);
   },
 
-  updateGalleryItem(id: string, updates: Partial<GalleryItem>): GalleryItem | null {
-    const idx = inMemoryDb.gallery.findIndex((g: GalleryItem) => g.id === id);
-    if (idx === -1) return null;
-    inMemoryDb.gallery[idx] = { ...inMemoryDb.gallery[idx], ...updates, id };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.gallery[idx];
+  async addService(service: Omit<TreatmentService, 'id'>): Promise<TreatmentService> {
+    return mutateDatabase((database) => {
+      const created = { ...service, id: getId('srv') };
+      database.services.push(created);
+      return created;
+    });
   },
 
-  deleteGalleryItem(id: string): boolean {
-    const idx = inMemoryDb.gallery.findIndex((g: GalleryItem) => g.id === id);
-    if (idx === -1) return false;
-    inMemoryDb.gallery.splice(idx, 1);
-    saveDatabase(inMemoryDb);
-    return true;
+  async updateService(id: string, updates: Partial<TreatmentService>): Promise<TreatmentService | null> {
+    return mutateDatabase((database) => {
+      const index = database.services.findIndex((service) => service.id === id);
+      if (index === -1) return null;
+      database.services[index] = { ...database.services[index], ...updates, id };
+      return database.services[index];
+    });
   },
 
-  // FAQs
-  getFAQs(all = false): FAQItem[] {
-    const list = all ? inMemoryDb.faqs : inMemoryDb.faqs.filter((f: FAQItem) => f.isVisible);
-    return [...list].sort((a, b) => a.order - b.order);
+  async deleteService(id: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      const index = database.services.findIndex((service) => service.id === id);
+      if (index === -1) return false;
+      database.services.splice(index, 1);
+      return true;
+    });
   },
 
-  addFAQ(faq: Omit<FAQItem, 'id'>): FAQItem {
-    const id = `faq-${Date.now()}`;
-    const newFAQ: FAQItem = { ...faq, id };
-    inMemoryDb.faqs.push(newFAQ);
-    saveDatabase(inMemoryDb);
-    return newFAQ;
+  async getGallery(all = false): Promise<GalleryItem[]> {
+    const database = await readDatabase();
+    const gallery = all ? database.gallery : database.gallery.filter((item) => item.isVisible);
+    return [...gallery].sort((a, b) => a.order - b.order);
   },
 
-  updateFAQ(id: string, updates: Partial<FAQItem>): FAQItem | null {
-    const idx = inMemoryDb.faqs.findIndex((f: FAQItem) => f.id === id);
-    if (idx === -1) return null;
-    inMemoryDb.faqs[idx] = { ...inMemoryDb.faqs[idx], ...updates, id };
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.faqs[idx];
+  async addGalleryItem(item: Omit<GalleryItem, 'id'>): Promise<GalleryItem> {
+    return mutateDatabase((database) => {
+      const created = { ...item, id: getId('gal') };
+      database.gallery.push(created);
+      return created;
+    });
   },
 
-  deleteFAQ(id: string): boolean {
-    const idx = inMemoryDb.faqs.findIndex((f: FAQItem) => f.id === id);
-    if (idx === -1) return false;
-    inMemoryDb.faqs.splice(idx, 1);
-    saveDatabase(inMemoryDb);
-    return true;
+  async updateGalleryItem(id: string, updates: Partial<GalleryItem>): Promise<GalleryItem | null> {
+    return mutateDatabase((database) => {
+      const index = database.gallery.findIndex((item) => item.id === id);
+      if (index === -1) return null;
+      database.gallery[index] = { ...database.gallery[index], ...updates, id };
+      return database.gallery[index];
+    });
   },
 
-  // Enquiries
-  getEnquiries(): PatientEnquiry[] {
-    return [...inMemoryDb.enquiries].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  async deleteGalleryItem(id: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      const index = database.gallery.findIndex((item) => item.id === id);
+      if (index === -1) return false;
+      database.gallery.splice(index, 1);
+      return true;
+    });
   },
 
-  addEnquiry(enquiry: {
+  async getFAQs(all = false): Promise<FAQItem[]> {
+    const database = await readDatabase();
+    const faqs = all ? database.faqs : database.faqs.filter((faq) => faq.isVisible);
+    return [...faqs].sort((a, b) => a.order - b.order);
+  },
+
+  async addFAQ(faq: Omit<FAQItem, 'id'>): Promise<FAQItem> {
+    return mutateDatabase((database) => {
+      const created = { ...faq, id: getId('faq') };
+      database.faqs.push(created);
+      return created;
+    });
+  },
+
+  async updateFAQ(id: string, updates: Partial<FAQItem>): Promise<FAQItem | null> {
+    return mutateDatabase((database) => {
+      const index = database.faqs.findIndex((faq) => faq.id === id);
+      if (index === -1) return null;
+      database.faqs[index] = { ...database.faqs[index], ...updates, id };
+      return database.faqs[index];
+    });
+  },
+
+  async deleteFAQ(id: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      const index = database.faqs.findIndex((faq) => faq.id === id);
+      if (index === -1) return false;
+      database.faqs.splice(index, 1);
+      return true;
+    });
+  },
+
+  async getEnquiries(): Promise<PatientEnquiry[]> {
+    const database = await readDatabase();
+    return [...database.enquiries].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  },
+
+  async addEnquiry(enquiry: {
     patientName: string;
     phoneNumber: string;
     serviceRequested: string;
@@ -223,69 +345,93 @@ export const DataStore = {
     preferredTimeSlot?: string;
     message?: string;
     isHomeVisitRequested: boolean;
-  }): PatientEnquiry {
-    const id = `enq-${Date.now()}`;
-    const newEnquiry: PatientEnquiry = {
-      ...enquiry,
-      id,
-      status: 'new',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    inMemoryDb.enquiries.unshift(newEnquiry);
-    saveDatabase(inMemoryDb);
-    return newEnquiry;
-  },
-
-  updateEnquiryStatus(id: string, status: PatientEnquiry['status'], internalNotes?: string): PatientEnquiry | null {
-    const idx = inMemoryDb.enquiries.findIndex((e: PatientEnquiry) => e.id === id);
-    if (idx === -1) return null;
-    inMemoryDb.enquiries[idx].status = status;
-    if (internalNotes !== undefined) {
-      inMemoryDb.enquiries[idx].internalNotes = internalNotes;
-    }
-    inMemoryDb.enquiries[idx].updatedAt = new Date().toISOString();
-    saveDatabase(inMemoryDb);
-    return inMemoryDb.enquiries[idx];
-  },
-
-  deleteEnquiry(id: string): boolean {
-    const idx = inMemoryDb.enquiries.findIndex((e: PatientEnquiry) => e.id === id);
-    if (idx === -1) return false;
-    inMemoryDb.enquiries.splice(idx, 1);
-    saveDatabase(inMemoryDb);
-    return true;
-  },
-
-  // Authentication & Sessions
-  verifyPassword(candidate: string): boolean {
-    const computed = hashPassword(candidate, inMemoryDb.adminSalt);
-    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(inMemoryDb.adminPasswordHash));
-  },
-
-  changePassword(oldPassword: string, newPassword: string): boolean {
-    if (!this.verifyPassword(oldPassword)) {
-      return false;
-    }
-    const newSalt = generateSalt();
-    inMemoryDb.adminSalt = newSalt;
-    inMemoryDb.adminPasswordHash = hashPassword(newPassword, newSalt);
-    saveDatabase(inMemoryDb);
-    return true;
-  },
-
-  createSession(): string {
-    const token = crypto.randomBytes(32).toString('hex');
-    const now = Date.now();
-    activeSessions.set(token, {
-      createdAt: now,
-      expiresAt: now + 7 * 24 * 60 * 60 * 1000 // 7 days
+  }): Promise<PatientEnquiry> {
+    return mutateDatabase((database) => {
+      const now = new Date().toISOString();
+      const created: PatientEnquiry = {
+        ...enquiry,
+        id: getId('enq'),
+        status: 'new',
+        createdAt: now,
+        updatedAt: now,
+      };
+      database.enquiries.unshift(created);
+      return created;
     });
+  },
+
+  async updateEnquiryStatus(
+    id: string,
+    status: PatientEnquiry['status'],
+    internalNotes?: string
+  ): Promise<PatientEnquiry | null> {
+    return mutateDatabase((database) => {
+      const enquiry = database.enquiries.find((item) => item.id === id);
+      if (!enquiry) return null;
+      enquiry.status = status;
+      if (internalNotes !== undefined) enquiry.internalNotes = internalNotes;
+      enquiry.updatedAt = new Date().toISOString();
+      return enquiry;
+    });
+  },
+
+  async deleteEnquiry(id: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      const index = database.enquiries.findIndex((enquiry) => enquiry.id === id);
+      if (index === -1) return false;
+      database.enquiries.splice(index, 1);
+      return true;
+    });
+  },
+
+  async verifyPassword(candidate: string): Promise<boolean> {
+    const database = await readDatabase();
+    return isPasswordMatch(candidate, database.adminSalt, database.adminPasswordHash);
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
+    return mutateDatabase((database) => {
+      if (!isPasswordMatch(currentPassword, database.adminSalt, database.adminPasswordHash)) return false;
+      const salt = generateSalt();
+      database.adminSalt = salt;
+      database.adminPasswordHash = hashPassword(newPassword, salt);
+      return true;
+    });
+  },
+
+  async createSession(): Promise<string> {
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    if (d1Config) {
+      await queryD1(
+        d1Config,
+        'INSERT INTO orthocare_clinic_sessions (token_hash, expires_at) VALUES (?, ?)',
+        [hashSessionToken(token), expiresAt]
+      );
+    } else {
+      activeSessions.set(token, { expiresAt });
+    }
     return token;
   },
 
-  validateSession(token?: string): boolean {
+  async validateSession(token?: string): Promise<boolean> {
     if (!token) return false;
+    const tokenHash = hashSessionToken(token);
+    if (d1Config) {
+      const { results } = await queryD1<{ expires_at: number }>(
+        d1Config,
+        'SELECT expires_at FROM orthocare_clinic_sessions WHERE token_hash = ?',
+        [tokenHash]
+      );
+      const session = results[0];
+      if (!session) return false;
+      if (Number(session.expires_at) < Date.now()) {
+        await queryD1(d1Config, 'DELETE FROM orthocare_clinic_sessions WHERE token_hash = ?', [tokenHash]);
+        return false;
+      }
+      return true;
+    }
+
     const session = activeSessions.get(token);
     if (!session) return false;
     if (Date.now() > session.expiresAt) {
@@ -295,27 +441,25 @@ export const DataStore = {
     return true;
   },
 
-  destroySession(token?: string): void {
-    if (token) activeSessions.delete(token);
+  async destroySession(token?: string): Promise<void> {
+    if (!token) return;
+    if (d1Config) {
+      await queryD1(d1Config, 'DELETE FROM orthocare_clinic_sessions WHERE token_hash = ?', [hashSessionToken(token)]);
+      return;
+    }
+    activeSessions.delete(token);
   },
 
-  // File uploads
   saveUploadedImage(base64Data: string, originalName: string): string {
-    // strip header data:image/png;base64,
     const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-    const ext = originalName.split('.').pop() || 'jpg';
-    const cleanExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase()) ? ext.toLowerCase() : 'jpg';
-    const filename = `orthocare_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${cleanExt}`;
+    const extension = originalName.split('.').pop() || 'jpg';
+    const safeExtension = ['jpg', 'jpeg', 'png', 'webp'].includes(extension.toLowerCase())
+      ? extension.toLowerCase()
+      : 'jpg';
+    const filename = `orthocare_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${safeExtension}`;
     const filePath = path.join(UPLOAD_DIR, filename);
-
-    if (matches && matches.length === 3) {
-      const buffer = Buffer.from(matches[2], 'base64');
-      fs.writeFileSync(filePath, buffer);
-    } else {
-      const buffer = Buffer.from(base64Data, 'base64');
-      fs.writeFileSync(filePath, buffer);
-    }
-
+    const buffer = Buffer.from(matches?.[2] || base64Data, 'base64');
+    fs.writeFileSync(filePath, buffer);
     return `/uploads/${filename}`;
-  }
+  },
 };

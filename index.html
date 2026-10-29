@@ -20,6 +20,7 @@
     
     <!-- OpenGraph Social Cards -->
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_IN" />
     <meta property="og:title" content="Orthocare Physiotherapy Clinic | Baghpat" />
     <meta property="og:description" content="Physiotherapy and rehabilitation care in Baghpat. Contact Orthocare Physiotherapy Clinic for appointment enquiries and home-visit availability." />
     <meta property="og:site_name" content="Orthocare Physiotherapy Clinic" />
@@ -42,41 +43,78 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
-    <!-- Schema.org JSON-LD Local Medical Business -->
+    <!-- Schema.org JSON-LD for the clinic and website -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "MedicalClinic",
-      "medicalSpecialty": "Physiotherapy",
-      "name": "Orthocare Physiotherapy Clinic",
-      "description": "Physiotherapy clinic in Aggarwal Mandi, Tatiri, Baghpat, Uttar Pradesh, offering rehabilitation, pain relief care and home visits.",
-      "image": "https://orthocareclinic.in/images/orthocare-clinic-front.png",
-      "telephone": "+918864849409",
-      "url": "https://orthocareclinic.in",
-      "email": "orthocareclinic.in@gmail.com",
-      "hasMap": "https://www.google.com/maps/search/?api=1&query=X72C%2BRQ%2C%20Baghpat%2C%20Uttar%20Pradesh",
-      "areaServed": [
-        { "@type": "City", "name": "Tatiri" },
-        { "@type": "AdministrativeArea", "name": "Baghpat, Uttar Pradesh" }
-      ],
-      "address": {
-        "@type": "PostalAddress",
-        "streetAddress": "Main Road, Aggarwal Mandi, Tatiri",
-        "addressLocality": "Baghpat",
-        "addressRegion": "Uttar Pradesh",
-        "postalCode": "250609",
-        "addressCountry": "IN"
-      },
-      "founder": {
-        "@type": "Person",
-        "name": "Dr. Harshit Jain (PT)",
-        "jobTitle": "Consultant Physiotherapist",
-        "honorificPrefix": "Dr.",
-        "hasCredential": [
-          "BPT", "COMT", "MIAP", "CNDS (Delhi)"
-        ]
-      },
-      "priceRange": "₹₹"
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://orthocareclinic.in/#website",
+          "url": "https://orthocareclinic.in/",
+          "name": "Orthocare Physiotherapy Clinic",
+          "inLanguage": ["en-IN", "hi-IN"],
+          "publisher": { "@id": "https://orthocareclinic.in/#clinic" }
+        },
+        {
+          "@type": "MedicalClinic",
+          "@id": "https://orthocareclinic.in/#clinic",
+          "name": "Orthocare Physiotherapy Clinic",
+          "alternateName": "Orthocare Physiotherapy Clinic, Baghpat",
+          "description": "Physiotherapy and rehabilitation care in Aggarwal Mandi, Tatiri, Baghpat, Uttar Pradesh, with home-visit availability.",
+          "medicalSpecialty": "Physiotherapy",
+          "url": "https://orthocareclinic.in/",
+          "image": "https://orthocareclinic.in/images/orthocare-clinic-front.png",
+          "logo": "https://orthocareclinic.in/logos/orthocare-logo-horizontal.jpg",
+          "telephone": "+918864849409",
+          "email": "orthocareclinic.in@gmail.com",
+          "hasMap": "https://www.google.com/maps/search/?api=1&query=X72C%2BRQ%2C%20Baghpat%2C%20Uttar%20Pradesh",
+          "areaServed": [
+            { "@type": "Place", "name": "Tatiri, Baghpat" },
+            { "@type": "AdministrativeArea", "name": "Baghpat, Uttar Pradesh" }
+          ],
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "Main Road, Aggarwal Mandi Tatiri",
+            "addressLocality": "Baghpat",
+            "addressRegion": "Uttar Pradesh",
+            "postalCode": "250609",
+            "addressCountry": "IN"
+          },
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "https://schema.org/Monday",
+                "https://schema.org/Tuesday",
+                "https://schema.org/Wednesday",
+                "https://schema.org/Thursday",
+                "https://schema.org/Friday"
+              ],
+              "opens": "09:00",
+              "closes": "20:00"
+            },
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": "https://schema.org/Saturday",
+              "opens": "09:00",
+              "closes": "14:00"
+            }
+          ],
+          "contactPoint": {
+            "@type": "ContactPoint",
+            "telephone": "+918864849409",
+            "contactType": "appointments and clinic enquiries",
+            "availableLanguage": ["English", "Hindi"]
+          },
+          "founder": {
+            "@type": "Person",
+            "name": "Harshit Jain",
+            "jobTitle": "Consultant Physiotherapist",
+            "honorificPrefix": "Dr."
+          }
+        }
+      ]
     }
     </script>
   </head>

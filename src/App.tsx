@@ -1,5 +1,6 @@
-import React from 'react';
-import { ClinicProvider, useClinic } from './context/ClinicContext';
+import React, { useEffect } from 'react';
+import { ClinicBootstrapData, ClinicProvider, useClinic } from './context/ClinicContext';
+import { getCanonicalUrl, getRobotsContent, PAGE_METADATA } from './seo';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { MobileQuickBar } from './components/MobileQuickBar';
@@ -18,6 +19,28 @@ import { RefreshCw } from 'lucide-react';
 
 function AppContent() {
   const { activeView, selectedService, setSelectedService, isLoading, error, refreshData } = useClinic();
+
+  useEffect(() => {
+    const metadata = PAGE_METADATA[activeView] || PAGE_METADATA.home;
+    const canonicalUrl = getCanonicalUrl(activeView);
+    const robots = getRobotsContent(activeView);
+
+    document.title = metadata.title;
+
+    const updateMeta = (selector: string, value: string, attribute: 'content' | 'href') => {
+      const element = document.head.querySelector<HTMLMetaElement | HTMLLinkElement>(selector);
+      element?.setAttribute(attribute, value);
+    };
+
+    updateMeta('meta[name="description"]', metadata.description, 'content');
+    updateMeta('meta[name="robots"]', robots, 'content');
+    updateMeta('meta[property="og:title"]', metadata.title, 'content');
+    updateMeta('meta[property="og:description"]', metadata.description, 'content');
+    updateMeta('meta[property="og:url"]', canonicalUrl, 'content');
+    updateMeta('meta[name="twitter:title"]', metadata.title, 'content');
+    updateMeta('meta[name="twitter:description"]', metadata.description, 'content');
+    updateMeta('link[rel="canonical"]', canonicalUrl, 'href');
+  }, [activeView]);
 
   if (isLoading) {
     return (
@@ -83,9 +106,14 @@ function AppContent() {
   );
 }
 
-export default function App() {
+interface AppProps {
+  initialData?: ClinicBootstrapData;
+  initialView?: string;
+}
+
+export default function App({ initialData, initialView }: AppProps = {}) {
   return (
-    <ClinicProvider>
+    <ClinicProvider initialData={initialData} initialView={initialView}>
       <AppContent />
     </ClinicProvider>
   );

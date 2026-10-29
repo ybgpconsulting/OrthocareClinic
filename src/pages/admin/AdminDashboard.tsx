@@ -89,9 +89,6 @@ export function AdminDashboard() {
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
 
-  // Upload state
-  const [isUploading, setIsUploading] = useState(false);
-
   // Status filter for enquiries
   const [enquiryStatusFilter, setEnquiryStatusFilter] = useState<string>('all');
 
@@ -320,27 +317,6 @@ export function AdminDashboard() {
       refreshData();
     } catch (err: any) {
       showFeedback('error', err.message || 'Failed to delete gallery item');
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, targetCallback: (url: string) => void) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 20 * 1024 * 1024) {
-      showFeedback('error', 'File size exceeds 20MB limit');
-      return;
-    }
-
-    try {
-      setIsUploading(true);
-      const url = await api.uploadImage(file);
-      targetCallback(url);
-      showFeedback('success', 'Image uploaded successfully!');
-    } catch (err: any) {
-      showFeedback('error', err.message || 'Failed to upload image file');
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -1286,37 +1262,20 @@ export function AdminDashboard() {
             <div>
               <h2 className="text-xl font-bold text-slate-900">Clinic Image Gallery</h2>
               <p className="text-xs text-slate-500">
-                Upload real photographs of clinic entrance, treatment beds, and electrotherapy equipment.
+                Use static image paths from the public images folder. File uploads are temporarily unavailable.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
-              {/* File upload directly from computer / phone */}
-              <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 shadow-xs cursor-pointer">
+              <button
+                type="button"
+                disabled
+                title="Image uploads are temporarily unavailable"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-200 text-slate-500 text-xs font-semibold shadow-xs cursor-not-allowed"
+              >
                 <Upload className="w-4 h-4" />
-                <span>{isUploading ? 'Uploading...' : 'Upload New Photo'}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={isUploading}
-                  className="hidden"
-                  onChange={(e) =>
-                    handleFileUpload(e, (url) => {
-                      setEditingGallery({
-                        id: '',
-                        title: 'Clinic Photo',
-                        category: 'rehabilitation',
-                        url,
-                        alt: 'Orthocare Physiotherapy Clinic photo',
-                        caption: '',
-                        order: gallery.length + 1,
-                        isVisible: true,
-                      });
-                      setIsCreatingGallery(true);
-                    })
-                  }
-                />
-              </label>
+                <span>Uploads unavailable</span>
+              </button>
 
               <button
                 onClick={() => {
@@ -1361,7 +1320,7 @@ export function AdminDashboard() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
-                    Photo URL or Uploaded Path *
+                    Static Photo URL or Path *
                   </label>
                   <input
                     type="text"
@@ -1369,6 +1328,7 @@ export function AdminDashboard() {
                     value={editingGallery?.url || ''}
                     onChange={(e) => setEditingGallery((prev: any) => ({ ...prev, url: e.target.value }))}
                     className="w-full px-3 py-2 text-sm border rounded-xl"
+                    placeholder="/images/clinic_treatment_room_1793268957681.jpg"
                   />
                 </div>
 

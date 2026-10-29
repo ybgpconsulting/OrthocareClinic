@@ -25,37 +25,68 @@ interface ClinicContextType {
   refreshData: () => Promise<void>;
 }
 
+export interface ClinicBootstrapData {
+  settings: ClinicSettings;
+  content: ClinicContent;
+  categories: ServiceCategory[];
+  services: TreatmentService[];
+  gallery: GalleryItem[];
+  faqs: FAQItem[];
+}
+
 const ClinicContext = createContext<ClinicContextType | undefined>(undefined);
 
-export function ClinicProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<ClinicSettings | null>(null);
-  const [content, setContent] = useState<ClinicContent | null>(null);
-  const [categories, setCategories] = useState<ServiceCategory[]>([]);
-  const [services, setServices] = useState<TreatmentService[]>([]);
-  const [gallery, setGallery] = useState<GalleryItem[]>([]);
-  const [faqs, setFaqs] = useState<FAQItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+export const VIEW_PATHS: Record<string, string> = {
+  home: '/',
+  services: '/treatments',
+  about: '/about',
+  gallery: '/gallery',
+  contact: '/contact',
+  faqs: '/faqs',
+  privacy: '/privacy-policy',
+  admin: '/admin',
+};
+
+function getViewFromLocation() {
+  const hash = window.location.hash.replace('#', '').trim();
+  if (Object.prototype.hasOwnProperty.call(VIEW_PATHS, hash)) return hash;
+
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  return Object.entries(VIEW_PATHS).find(([, path]) => path === pathname)?.[0] || 'home';
+}
+
+export function ClinicProvider({
+  children,
+  initialData,
+  initialView,
+}: {
+  children: ReactNode;
+  initialData?: ClinicBootstrapData;
+  initialView?: string;
+}) {
+  const [settings, setSettings] = useState<ClinicSettings | null>(initialData?.settings ?? null);
+  const [content, setContent] = useState<ClinicContent | null>(initialData?.content ?? null);
+  const [categories, setCategories] = useState<ServiceCategory[]>(initialData?.categories ?? []);
+  const [services, setServices] = useState<TreatmentService[]>(initialData?.services ?? []);
+  const [gallery, setGallery] = useState<GalleryItem[]>(initialData?.gallery ?? []);
+  const [faqs, setFaqs] = useState<FAQItem[]>(initialData?.faqs ?? []);
+  const [isLoading, setIsLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState<'en' | 'hi'>('en');
-  const [activeView, setActiveView] = useState<string>('home');
+  const [activeView, setActiveView] = useState<string>(() => initialView || getViewFromLocation());
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [prefilledServiceName, setPrefilledServiceName] = useState('');
   const [selectedService, setSelectedService] = useState<TreatmentService | null>(null);
 
-  // Sync hash or URL
   useEffect(() => {
-    const handleHash = () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      if (['home', 'about', 'services', 'gallery', 'contact', 'faqs', 'privacy', 'admin'].includes(hash)) {
-        setActiveView(hash);
-      } else if (window.location.pathname === '/admin') {
-        setActiveView('admin');
-      }
+    const handleLocationChange = () => setActiveView(getViewFromLocation());
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    handleLocationChange();
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
     };
-
-    handleHash();
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
   const loadData = async () => {
@@ -101,8 +132,13 @@ export function ClinicProvider({ children }: { children: ReactNode }) {
   };
 
   const navigateTo = (view: string) => {
+    const path = VIEW_PATHS[view];
+    if (!path) {
+      throw new Error(`Unknown clinic page: ${view}`);
+    }
+
     setActiveView(view);
-    window.location.hash = view;
+    window.history.pushState(null, '', path);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 

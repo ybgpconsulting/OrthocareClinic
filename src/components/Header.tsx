@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useClinic } from '../context/ClinicContext';
+import { useClinic, VIEW_PATHS } from '../context/ClinicContext';
 import { Phone, Calendar, Languages } from 'lucide-react';
 
 export function Header() {
@@ -71,9 +71,13 @@ export function Header() {
 
           <nav aria-label="Main navigation" className="hidden items-center gap-4 text-sm font-semibold text-slate-700 xl:flex 2xl:gap-6">
             {navLinks.map((link) => (
-              <button
+              <a
                 key={link.id}
-                onClick={() => handleNavClick(link.id)}
+                href={VIEW_PATHS[link.id]}
+                onClick={(event) => {
+                  event.preventDefault();
+                  handleNavClick(link.id);
+                }}
                 aria-current={activeView === link.id ? 'page' : undefined}
                 className={`whitespace-nowrap rounded-sm border-b-2 py-2 transition-colors hover:text-blue-900 ${
                   activeView === link.id
@@ -82,7 +86,7 @@ export function Header() {
                 }`}
               >
                 {link.label}
-              </button>
+              </a>
             ))}
           </nav>
 
@@ -128,9 +132,13 @@ export function Header() {
         <div className="border-t border-slate-100 py-2.5 xl:hidden">
           <nav aria-label="Mobile navigation" className="grid grid-cols-3 gap-1.5 sm:gap-2">
             {navLinks.map((link) => (
-              <button
+              <a
                 key={link.id}
-                onClick={() => handleNavClick(link.id)}
+                href={VIEW_PATHS[link.id]}
+                onClick={(event) => {
+                  event.preventDefault();
+                  handleNavClick(link.id);
+                }}
                 aria-current={activeView === link.id ? 'page' : undefined}
                 className={`flex min-h-11 min-w-0 items-center justify-center rounded-xl px-1.5 py-2 text-center text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800 sm:text-sm ${
                   activeView === link.id
@@ -139,7 +147,7 @@ export function Header() {
                 }`}
               >
                 <span className="break-words leading-tight">{link.label}</span>
-              </button>
+              </a>
             ))}
             <button
               onClick={toggleLanguage}

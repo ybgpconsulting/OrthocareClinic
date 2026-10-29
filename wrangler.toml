@@ -1,0 +1,10 @@
+name = "orthocareclinic"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-03-01"
+
+# Pages uses D1 for structured data; existing static images remain in public/.
+[[d1_databases]]
+binding = "DB"
+database_name = "orthocareclinic"
+database_id = "bb1485a9-0b59-41b4-abf2-d4a7ca1e8f2d"
+migrations_dir = "migrations"
