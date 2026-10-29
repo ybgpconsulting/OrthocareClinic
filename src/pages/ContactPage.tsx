@@ -14,6 +14,7 @@ export function ContactPage() {
   const [preferredDate, setPreferredDate] = useState('');
   const [isHomeVisitRequested, setIsHomeVisitRequested] = useState(false);
   const [message, setMessage] = useState('');
+  const [website, setWebsite] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +42,7 @@ export function ContactPage() {
         preferredDate,
         message,
         isHomeVisitRequested,
+        website,
       });
       setIsSuccess(true);
     } catch (err: any) {
@@ -201,8 +203,18 @@ export function ContactPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
+                <input
+                  type="text"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={website}
+                  onChange={(event) => setWebsite(event.target.value)}
+                />
+              </div>
               {error && (
-                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2">
+                <div role="alert" aria-live="assertive" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2">
                   <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
                   <span>{error}</span>
                 </div>
@@ -210,12 +222,14 @@ export function ContactPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  <label htmlFor="contact-patient-name" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                     {language === 'hi' ? 'मरीज का नाम *' : 'Patient Full Name *'}
                   </label>
                   <input
+                    id="contact-patient-name"
                     type="text"
                     required
+                    maxLength={120}
                     value={patientName}
                     onChange={(e) => setPatientName(e.target.value)}
                     placeholder="e.g. Satish Kumar"
@@ -224,7 +238,7 @@ export function ContactPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  <label htmlFor="contact-phone" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                     {language === 'hi' ? 'मोबाइल नंबर *' : 'Phone Number (10 digits) *'}
                   </label>
                   <div className="relative">
@@ -232,9 +246,10 @@ export function ContactPage() {
                       +91
                     </span>
                     <input
+                      id="contact-phone"
                       type="tel"
                       required
-                      maxLength={10}
+                      maxLength={24}
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value)}
                       placeholder="8864849409"
@@ -246,10 +261,11 @@ export function ContactPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  <label htmlFor="contact-service" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                     {language === 'hi' ? 'उपचार / समस्या' : 'Service / Concern'}
                   </label>
                   <select
+                    id="contact-service"
                     value={serviceRequested}
                     onChange={(e) => setServiceRequested(e.target.value)}
                     className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
@@ -264,10 +280,11 @@ export function ContactPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                  <label htmlFor="contact-date" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                     {language === 'hi' ? 'पसंदीदा तारीख' : 'Preferred Date'}
                   </label>
                   <input
+                    id="contact-date"
                     type="date"
                     min={new Date().toISOString().split('T')[0]}
                     value={preferredDate}
@@ -298,11 +315,13 @@ export function ContactPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                <label htmlFor="contact-message" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                   {language === 'hi' ? 'समस्या या संदेश (वैकल्पिक)' : 'Describe your problem / symptoms (Optional)'}
                 </label>
                 <textarea
+                  id="contact-message"
                   rows={3}
+                  maxLength={2000}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="e.g. Knee pain after standing, previous surgery notes, etc."

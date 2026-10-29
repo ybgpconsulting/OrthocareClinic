@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useClinic } from '../context/ClinicContext';
 import { TreatmentService } from '../types';
 import { X, Clock, Home, CheckCircle2, Calendar, Sparkles } from 'lucide-react';
 import { WhatsAppIcon } from './WhatsAppIcon';
+import { ResponsiveImage } from './ResponsiveImage';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 
 interface Props {
   service: TreatmentService | null;
@@ -11,6 +13,8 @@ interface Props {
 
 export function ServiceDetailModal({ service, onClose }: Props) {
   const { openAppointmentModal, getWhatsappUrl, language, categories } = useClinic();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(Boolean(service), dialogRef, onClose);
 
   if (!service) return null;
 
@@ -23,7 +27,13 @@ export function ServiceDetailModal({ service, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="relative w-full max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-100 overflow-hidden max-h-[92vh] sm:max-h-[85vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="service-dialog-title"
+        className="relative w-full max-w-2xl bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-100 overflow-hidden max-h-[92vh] sm:max-h-[85vh] flex flex-col"
+      >
         
         {/* Modal Top Header */}
         <div className="bg-slate-900 px-5 sm:px-6 py-4 sm:py-5 text-white flex items-center justify-between shrink-0">
@@ -31,7 +41,7 @@ export function ServiceDetailModal({ service, onClose }: Props) {
             <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-400 block">
               {category?.name || 'Physiotherapy Care'}
             </span>
-            <h3 className="text-lg sm:text-xl font-bold text-white mt-0.5 font-heading">
+            <h3 id="service-dialog-title" className="text-lg sm:text-xl font-bold text-white mt-0.5 font-heading">
               {service.name}
             </h3>
             {service.nameHi && (
@@ -52,10 +62,10 @@ export function ServiceDetailModal({ service, onClose }: Props) {
           {/* Optional service image */}
           {service.image && (
             <div className="w-full h-44 sm:h-56 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200">
-              <img
+              <ResponsiveImage
                 src={service.image}
                 alt={service.name}
-                referrerPolicy="no-referrer"
+                sizes="(min-width: 640px) 42rem, 100vw"
                 className="w-full h-full object-cover"
               />
             </div>

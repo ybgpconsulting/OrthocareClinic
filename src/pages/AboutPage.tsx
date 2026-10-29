@@ -1,6 +1,7 @@
 import React from 'react';
 import { useClinic } from '../context/ClinicContext';
 import { ShieldCheck, Award, HeartHandshake, CheckCircle2, MapPin, Phone, Calendar } from 'lucide-react';
+import { ResponsiveImage } from '../components/ResponsiveImage';
 
 export function AboutPage() {
   const { settings, content, openAppointmentModal, getWhatsappUrl, language } = useClinic();
@@ -32,12 +33,10 @@ export function AboutPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center bg-white p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-xs">
         <div className="lg:col-span-5">
           <div className="rounded-2xl overflow-hidden aspect-4/3 bg-slate-100 border border-slate-200 shadow-sm">
-            <img
+            <ResponsiveImage
               src={consultationImage}
               alt="Dr. Harshit Jain (PT) evaluating posture and spine health in clinic"
-              referrerPolicy="no-referrer"
-              loading="lazy"
-              decoding="async"
+              sizes="(min-width: 1024px) 40vw, 100vw"
               className="w-full h-full object-cover"
             />
           </div>

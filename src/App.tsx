@@ -42,7 +42,7 @@ function AppContent() {
     updateMeta('link[rel="canonical"]', canonicalUrl, 'href');
   }, [activeView]);
 
-  if (isLoading) {
+  if (activeView !== 'admin' && isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600 gap-3">
         <RefreshCw className="w-8 h-8 animate-spin text-blue-900" />
@@ -53,7 +53,7 @@ function AppContent() {
     );
   }
 
-  if (error) {
+  if (activeView !== 'admin' && error) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <div className="max-w-md bg-white p-8 rounded-3xl border border-slate-200 shadow-xl space-y-4">

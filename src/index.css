@@ -77,7 +77,7 @@
   inset: 0;
   content: '';
   pointer-events: none;
-  background-image: url('/images/orthocare-anatomy-background.jpg');
+  background-image: url('/images/responsive/orthocare-anatomy-background-768.webp');
   background-position: right 6% center;
   background-repeat: no-repeat;
   background-size: min(78vw, 780px) auto;

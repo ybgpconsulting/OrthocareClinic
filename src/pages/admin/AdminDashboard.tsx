@@ -38,6 +38,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { WhatsAppIcon } from '../../components/WhatsAppIcon';
+import { ResponsiveImage } from '../../components/ResponsiveImage';
+import { getAdminPasswordPolicyError } from '../../authPolicy';
 import {
   formatLegacySundayHours,
   formatLegacyWeekdayHours,
@@ -53,6 +55,7 @@ export function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authCheckError, setAuthCheckError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Tab navigation
@@ -72,6 +75,7 @@ export function AdminDashboard() {
 
   // Loading & notification states
   const [isLoadingTab, setIsLoadingTab] = useState(false);
+  const [adminDataError, setAdminDataError] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Modals & form editing states
@@ -98,14 +102,16 @@ export function AdminDashboard() {
   }, []);
 
   const checkAuthentication = async () => {
+    setAuthCheckError(null);
+    setIsAuthenticated(null);
     try {
       const isAuthed = await api.checkAuth();
       setIsAuthenticated(isAuthed);
       if (isAuthed) {
-        loadAllAdminData();
+        await loadAllAdminData();
       }
-    } catch {
-      setIsAuthenticated(false);
+    } catch (err: unknown) {
+      setAuthCheckError(err instanceof Error ? err.message : 'Unable to verify administrator session.');
     }
   };
 
@@ -117,8 +123,9 @@ export function AdminDashboard() {
       await api.login(passwordInput);
       setIsAuthenticated(true);
       setPasswordInput('');
-      await loadAllAdminData();
-      showFeedback('success', 'Logged in successfully as Administrator');
+      if (await loadAllAdminData()) {
+        showFeedback('success', 'Logged in successfully as Administrator');
+      }
     } catch (err: any) {
       setAuthError(err.message || 'Invalid admin password. Use the password configured for this clinic.');
     } finally {
@@ -127,14 +134,19 @@ export function AdminDashboard() {
   };
 
   const handleLogout = async () => {
-    await api.logout();
-    setIsAuthenticated(false);
-    setActiveView('home');
+    try {
+      await api.logout();
+      setIsAuthenticated(false);
+      setActiveView('home');
+    } catch (err: unknown) {
+      showFeedback('error', err instanceof Error ? err.message : 'Failed to log out. Please try again.');
+    }
   };
 
-  const loadAllAdminData = async () => {
+  const loadAllAdminData = async (): Promise<boolean> => {
     try {
       setIsLoadingTab(true);
+      setAdminDataError(null);
       const [sStats, sEnqs, sSrvs, sCats, sGal, sFaqs, sSet, sCont] = await Promise.all([
         api.getStats(),
         api.getEnquiries(),
@@ -154,9 +166,11 @@ export function AdminDashboard() {
       setFaqs(sFaqs);
       setSettingsForm(sSet);
       setContentForm(sCont);
+      return true;
     } catch (err: any) {
       console.error('Failed to load admin data:', err);
-      showFeedback('error', 'Error loading administrative records');
+      setAdminDataError(err.message || 'Administrative records could not be loaded from the API.');
+      return false;
     } finally {
       setIsLoadingTab(false);
     }
@@ -364,17 +378,19 @@ export function AdminDashboard() {
       showFeedback('error', 'New password and confirmation do not match');
       return;
     }
-    if (newPass.length < 6) {
-      showFeedback('error', 'New password must be at least 6 characters');
+    const passwordError = getAdminPasswordPolicyError(newPass);
+    if (passwordError) {
+      showFeedback('error', passwordError);
       return;
     }
 
     try {
       await api.changePassword(currPass, newPass);
-      showFeedback('success', 'Admin password changed successfully! Remember your new password.');
       setCurrPass('');
       setNewPass('');
       setConfirmPass('');
+      setAuthError('Password changed successfully. Sign in again with your new password.');
+      setIsAuthenticated(false);
     } catch (err: any) {
       showFeedback('error', err.message || 'Failed to change password');
     }
@@ -416,6 +432,7 @@ export function AdminDashboard() {
               <input
                 type="password"
                 required
+                maxLength={128}
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder="Enter password..."
@@ -449,12 +466,75 @@ export function AdminDashboard() {
     );
   }
 
+  if (authCheckError) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-red-200 p-8 space-y-4">
+          <div className="flex items-center gap-3 text-red-700">
+            <AlertCircle className="w-6 h-6 shrink-0" />
+            <h1 className="text-lg font-bold">Unable to verify administrator session</h1>
+          </div>
+          <p role="alert" className="text-sm text-slate-600">{authCheckError}</p>
+          <p className="text-xs text-slate-500">The API did not confirm your session. No clinic data has been substituted.</p>
+          <button
+            type="button"
+            onClick={() => void checkAuthentication()}
+            className="w-full py-3 rounded-xl bg-blue-900 text-white text-sm font-semibold hover:bg-blue-800"
+          >
+            Retry Connection
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Loading state
   if (isAuthenticated === null) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center text-slate-500 text-sm">
         <RefreshCw className="w-5 h-5 animate-spin mr-2" />
         Checking administrator session...
+      </div>
+    );
+  }
+
+  if (isLoadingTab) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center text-slate-500 text-sm">
+        <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+        Loading current administrative records...
+      </div>
+    );
+  }
+
+  if (adminDataError) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center p-4">
+        <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl border border-red-200 p-8 space-y-4">
+          <div className="flex items-center gap-3 text-red-700">
+            <AlertCircle className="w-6 h-6 shrink-0" />
+            <h1 className="text-lg font-bold">Unable to load administrative records</h1>
+          </div>
+          <p role="alert" className="text-sm text-slate-600">{adminDataError}</p>
+          <p className="text-xs text-slate-500">The dashboard is unavailable until the API returns the current clinic data.</p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => void loadAllAdminData()}
+              disabled={isLoadingTab}
+              className="flex-1 py-3 rounded-xl bg-blue-900 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50"
+            >
+              {isLoadingTab ? 'Retrying…' : 'Retry Loading'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="px-5 py-3 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold hover:bg-slate-200"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1309,10 +1389,10 @@ export function AdminDashboard() {
 
                 {editingGallery?.url && (
                   <div className="w-full h-40 rounded-xl overflow-hidden bg-slate-100">
-                    <img
+                    <ResponsiveImage
                       src={editingGallery.url}
                       alt="Preview"
-                      referrerPolicy="no-referrer"
+                      sizes="(min-width: 640px) 32rem, 100vw"
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -1414,10 +1494,10 @@ export function AdminDashboard() {
               <div key={g.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col justify-between">
                 <div>
                   <div className="aspect-4/3 bg-slate-100 relative">
-                    <img
+                    <ResponsiveImage
                       src={g.url}
                       alt={g.alt || g.title}
-                      referrerPolicy="no-referrer"
+                      sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
                       className="w-full h-full object-cover"
                     />
                     <span className="absolute top-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-900/80 text-white uppercase tracking-wider">
@@ -1956,7 +2036,8 @@ export function AdminDashboard() {
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={12}
+                  maxLength={128}
                   value={newPass}
                   onChange={(e) => setNewPass(e.target.value)}
                   className="w-full px-3 py-2 text-sm border rounded-xl"
@@ -1970,7 +2051,8 @@ export function AdminDashboard() {
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={12}
+                  maxLength={128}
                   value={confirmPass}
                   onChange={(e) => setConfirmPass(e.target.value)}
                   className="w-full px-3 py-2 text-sm border rounded-xl"

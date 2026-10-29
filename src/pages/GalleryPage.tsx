@@ -2,11 +2,16 @@ import React, { useState } from 'react';
 import { useClinic } from '../context/ClinicContext';
 import { GalleryItem } from '../types';
 import { Camera, X, ZoomIn, Activity, Info } from 'lucide-react';
+import { ResponsiveImage } from '../components/ResponsiveImage';
+import { useDialogFocus } from '../hooks/useDialogFocus';
+import { useRef } from 'react';
 
 export function GalleryPage() {
   const { gallery, language } = useClinic();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activeItem, setActiveItem] = useState<GalleryItem | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(Boolean(activeItem), dialogRef, () => setActiveItem(null));
 
   const visibleGallery = gallery.filter((g) => g.isVisible);
   const filteredGallery =
@@ -71,12 +76,10 @@ export function GalleryPage() {
             className="group w-full text-left bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-xs hover:shadow-lg transition-all flex flex-col justify-between"
           >
             <div className="relative aspect-4/3 bg-slate-100 overflow-hidden">
-              <img
+              <ResponsiveImage
                 src={item.url}
                 alt={item.alt || item.title}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
+                sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
               <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
@@ -118,12 +121,16 @@ export function GalleryPage() {
           onClick={() => setActiveItem(null)}
         >
           <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gallery-dialog-title"
             className="relative max-w-4xl w-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-slate-800"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 flex items-center justify-between border-b border-slate-800 text-white">
               <div>
-                <h3 className="text-base font-bold">{activeItem.title}</h3>
+                <h3 id="gallery-dialog-title" className="text-base font-bold">{activeItem.title}</h3>
                 <span className="text-xs text-slate-400 uppercase tracking-wider">
                   {activeItem.category.replace('_', ' ')}
                 </span>
@@ -138,11 +145,10 @@ export function GalleryPage() {
             </div>
 
             <div className="max-h-[70vh] bg-black flex items-center justify-center overflow-hidden">
-              <img
+              <ResponsiveImage
                 src={activeItem.url}
                 alt={activeItem.alt || activeItem.title}
-                referrerPolicy="no-referrer"
-                decoding="async"
+                sizes="(min-width: 1024px) 80vw, 100vw"
                 className="max-h-[70vh] w-auto max-w-full object-contain"
               />
             </div>

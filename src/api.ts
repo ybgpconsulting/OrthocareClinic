@@ -1,80 +1,59 @@
 import { ClinicSettings, ClinicContent, ServiceCategory, TreatmentService, GalleryItem, FAQItem, PatientEnquiry, AdminStats } from './types';
+import { getAdminPasswordPolicyError } from './authPolicy';
 
-const TOKEN_KEY = 'orthocare_admin_token';
-const FALLBACK_DATA_PATH = '/site-data.json';
+function withoutId(value: object): object {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'id'));
+}
+
+async function responseError(response: Response, fallbackMessage: string): Promise<Error> {
+  try {
+    const data: unknown = await response.json();
+    if (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string') {
+      return new Error(data.error);
+    }
+  } catch {
+    // Keep the HTTP status as the actionable fallback for non-JSON API responses.
+  }
+  return new Error(`${fallbackMessage} (HTTP ${response.status})`);
+}
 
 async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  if (!response.ok) {
-    throw new Error(`Request failed for ${url}: ${response.status}`);
-  }
+  if (!response.ok) throw await responseError(response, `Request failed for ${url}`);
   return response.json() as Promise<T>;
 }
 
-async function readJsonWithFallback<T>(url: string, init?: RequestInit): Promise<T> {
-  try {
-    return await readJson<T>(url, init);
-  } catch (error) {
-    const fallback = await readJson<Record<string, any>>(FALLBACK_DATA_PATH);
-    if (url === '/api/settings') return (fallback.settings ?? fallback) as T;
-    if (url === '/api/content') return (fallback.content ?? fallback) as T;
-    if (url === '/api/categories') return (fallback.categories ?? []) as T;
-    if (url === '/api/services' || url.startsWith('/api/services?')) return (fallback.services ?? []) as T;
-    if (url === '/api/gallery' || url.startsWith('/api/gallery?')) return (fallback.gallery ?? []) as T;
-    if (url === '/api/faqs' || url.startsWith('/api/faqs?')) return (fallback.faqs ?? []) as T;
-    throw error;
-  }
-}
-
 export const api = {
-  // Auth token helpers
-  getToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-  },
-  setToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-  },
-  clearToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-  },
-
   getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
-    const token = this.getToken();
-    if (token) {
-      headers['Authorization'] = ['Bearer', token].join(' ');
-    }
-    return headers;
+    return { 'Content-Type': 'application/json' };
   },
 
   // Public & Shared
   async getSettings(): Promise<ClinicSettings> {
-    return readJsonWithFallback<ClinicSettings>('/api/settings');
+    return readJson<ClinicSettings>('/api/settings');
   },
 
   async getContent(): Promise<ClinicContent> {
-    return readJsonWithFallback<ClinicContent>('/api/content');
+    return readJson<ClinicContent>('/api/content');
   },
 
   async getCategories(): Promise<ServiceCategory[]> {
-    return readJsonWithFallback<ServiceCategory[]>('/api/categories');
+    return readJson<ServiceCategory[]>('/api/categories');
   },
 
   async getServices(all = false): Promise<TreatmentService[]> {
     const url = all ? '/api/services?all=true' : '/api/services';
-    return readJsonWithFallback<TreatmentService[]>(url, { headers: this.getHeaders() });
+    return readJson<TreatmentService[]>(url, { headers: this.getHeaders(), credentials: 'same-origin' });
   },
 
   async getGallery(all = false): Promise<GalleryItem[]> {
     const url = all ? '/api/gallery?all=true' : '/api/gallery';
-    return readJsonWithFallback<GalleryItem[]>(url, { headers: this.getHeaders() });
+    return readJson<GalleryItem[]>(url, { headers: this.getHeaders(), credentials: 'same-origin' });
   },
 
   async getFaqs(all = false): Promise<FAQItem[]> {
     const url = all ? '/api/faqs?all=true' : '/api/faqs';
-    return readJsonWithFallback<FAQItem[]>(url, { headers: this.getHeaders() });
+    return readJson<FAQItem[]>(url, { headers: this.getHeaders(), credentials: 'same-origin' });
   },
 
   async submitEnquiry(enquiry: {
@@ -85,6 +64,7 @@ export const api = {
     preferredTimeSlot?: string;
     message?: string;
     isHomeVisitRequested: boolean;
+    website?: string;
   }): Promise<{ success: boolean; message: string; enquiryId?: string }> {
     const res = await fetch('/api/enquiries', {
       method: 'POST',
@@ -97,47 +77,48 @@ export const api = {
   },
 
   // Admin Auth
-  async login(password: string): Promise<{ success: boolean; token: string }> {
+  async login(password: string): Promise<{ success: boolean; message: string }> {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password }),
+      credentials: 'same-origin',
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
-    this.setToken(data.token);
     return data;
   },
 
   async logout(): Promise<void> {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: this.getHeaders(),
-      });
-    } finally {
-      this.clearToken();
-    }
+    const res = await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'same-origin',
+    });
+    if (!res.ok) throw new Error('Failed to log out. Please try again.');
   },
 
   async checkAuth(): Promise<boolean> {
-    const token = this.getToken();
-    if (!token) return false;
-    try {
-      const res = await fetch('/api/auth/me', { headers: this.getHeaders() });
-      if (!res.ok) return false;
-      const data = await res.json();
-      return Boolean(data.authenticated);
-    } catch {
-      return false;
+    const res = await fetch('/api/auth/me', {
+      headers: this.getHeaders(),
+      credentials: 'same-origin',
+    });
+    if (!res.ok) throw await responseError(res, 'Unable to verify administrator session');
+    const data = await res.json();
+    if (!data || typeof data.authenticated !== 'boolean') {
+      throw new Error('The authentication service returned an invalid response.');
     }
+    return data.authenticated;
   },
 
   async changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const passwordError = getAdminPasswordPolicyError(newPassword);
+    if (passwordError) throw new Error(passwordError);
     const res = await fetch('/api/auth/change-password', {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ currentPassword, newPassword }),
+      credentials: 'same-origin',
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to change password');
@@ -146,8 +127,8 @@ export const api = {
 
   // Admin Stats
   async getStats(): Promise<AdminStats> {
-    const res = await fetch('/api/stats', { headers: this.getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch stats');
+    const res = await fetch('/api/stats', { headers: this.getHeaders(), credentials: 'same-origin' });
+    if (!res.ok) throw await responseError(res, 'Failed to fetch admin statistics');
     return res.json();
   },
 
@@ -179,7 +160,7 @@ export const api = {
     const res = await fetch('/api/services', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(service),
+      body: JSON.stringify(withoutId(service)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to create service');
@@ -190,7 +171,7 @@ export const api = {
     const res = await fetch(`/api/services/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(withoutId(updates)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to update service');
@@ -210,7 +191,7 @@ export const api = {
     const res = await fetch('/api/categories', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(category),
+      body: JSON.stringify(withoutId(category)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to create category');
@@ -221,7 +202,7 @@ export const api = {
     const res = await fetch(`/api/categories/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(withoutId(updates)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to update category');
@@ -242,7 +223,7 @@ export const api = {
     const res = await fetch('/api/gallery', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(item),
+      body: JSON.stringify(withoutId(item)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to add gallery item');
@@ -253,7 +234,7 @@ export const api = {
     const res = await fetch(`/api/gallery/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(withoutId(updates)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to update gallery item');
@@ -273,7 +254,7 @@ export const api = {
     const res = await fetch('/api/faqs', {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify(faq),
+      body: JSON.stringify(withoutId(faq)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to create FAQ');
@@ -284,7 +265,7 @@ export const api = {
     const res = await fetch(`/api/faqs/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(withoutId(updates)),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to update FAQ');
@@ -301,8 +282,8 @@ export const api = {
 
   // Admin Enquiries
   async getEnquiries(): Promise<PatientEnquiry[]> {
-    const res = await fetch('/api/enquiries', { headers: this.getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch enquiries');
+    const res = await fetch('/api/enquiries', { headers: this.getHeaders(), credentials: 'same-origin' });
+    if (!res.ok) throw await responseError(res, 'Failed to fetch enquiries');
     return res.json();
   },
 

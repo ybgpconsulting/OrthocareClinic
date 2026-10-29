@@ -4,11 +4,16 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { ClinicDatabase, PatientEnquiry, ServiceCategory, TreatmentService, GalleryItem, FAQItem } from './types';
 import { defaultDatabase, hashPassword, generateSalt } from './seedData';
 import { D1Config, getD1Config, queryD1 } from './d1Client';
+import { getAdminPasswordPolicyError } from '../src/authPolicy';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'clinic_data.json');
 const UPLOAD_DIR = path.resolve(process.cwd(), 'public', 'uploads');
 const MAX_WRITE_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+const ENQUIRY_WINDOW_MS = 15 * 60 * 1000;
+const ENQUIRY_MAX_SUBMISSIONS = 5;
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -20,6 +25,8 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 let d1Config: D1Config | null = null;
 let inMemoryDb: ClinicDatabase = defaultDatabase;
 const activeSessions = new Map<string, { expiresAt: number }>();
+const loginAttempts = new Map<string, { windowStartedAt: number; attempts: number; lockedUntil: number }>();
+const enquiryAttempts = new Map<string, { windowStartedAt: number; attempts: number }>();
 
 function normalizeDatabase(parsed: Partial<ClinicDatabase>): ClinicDatabase {
   return {
@@ -46,8 +53,8 @@ function loadLocalDatabase(): ClinicDatabase {
   }
 
   const initialAdminPassword = process.env.ADMIN_INITIAL_PASSWORD;
-  if (!initialAdminPassword || initialAdminPassword.length < 12) {
-    throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password of at least 12 characters before creating a new clinic database.');
+  if (!initialAdminPassword || getAdminPasswordPolicyError(initialAdminPassword)) {
+    throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 12 and 128 characters before creating a new clinic database.');
   }
 
   saveLocalDatabase(defaultDatabase);
@@ -156,12 +163,20 @@ export const DataStore = {
       d1Config,
       'CREATE TABLE IF NOT EXISTS orthocare_clinic_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)'
     );
+    await queryD1(
+      d1Config,
+      'CREATE TABLE IF NOT EXISTS orthocare_clinic_login_attempts (ip_hash TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, attempts INTEGER NOT NULL, locked_until INTEGER NOT NULL DEFAULT 0)'
+    );
+    await queryD1(
+      d1Config,
+      'CREATE TABLE IF NOT EXISTS orthocare_clinic_enquiry_attempts (ip_hash TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, attempts INTEGER NOT NULL)'
+    );
 
     let current = await readRemoteState();
     if (!current) {
       const password = process.env.ADMIN_INITIAL_PASSWORD;
-      if (!password || password.length < 12) {
-        throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password of at least 12 characters before initializing the Cloudflare D1 database.');
+      if (!password || getAdminPasswordPolicyError(password)) {
+        throw new Error('Set ADMIN_INITIAL_PASSWORD to a unique password between 12 and 128 characters before initializing the Cloudflare D1 database.');
       }
 
       const salt = generateSalt();
@@ -360,6 +375,47 @@ export const DataStore = {
     });
   },
 
+  async consumeEnquirySubmission(clientKey: string): Promise<number> {
+    const keyHash = hashSessionToken(`public-enquiry:${clientKey}`);
+    const now = Date.now();
+    let attempts: number;
+    let windowStartedAt: number;
+
+    if (d1Config) {
+      const { results } = await queryD1<{ attempts: number; window_started_at: number }>(
+        d1Config,
+        `INSERT INTO orthocare_clinic_enquiry_attempts (ip_hash, window_started_at, attempts)
+         VALUES (?, ?, 1)
+         ON CONFLICT(ip_hash) DO UPDATE SET
+           attempts = CASE WHEN window_started_at <= ? THEN 1 ELSE attempts + 1 END,
+           window_started_at = CASE WHEN window_started_at <= ? THEN excluded.window_started_at ELSE window_started_at END
+         RETURNING attempts, window_started_at`,
+        [keyHash, now, now - ENQUIRY_WINDOW_MS, now - ENQUIRY_WINDOW_MS]
+      );
+      if (!results[0]) throw new Error('D1 did not return the enquiry rate-limit result.');
+      attempts = Number(results[0].attempts);
+      windowStartedAt = Number(results[0].window_started_at);
+    } else {
+      let current = enquiryAttempts.get(keyHash);
+      if (!current || current.windowStartedAt <= now - ENQUIRY_WINDOW_MS) {
+        current = { windowStartedAt: now, attempts: 0 };
+        enquiryAttempts.set(keyHash, current);
+      }
+      current.attempts += 1;
+      attempts = current.attempts;
+      windowStartedAt = current.windowStartedAt;
+
+      if (enquiryAttempts.size > 10000) {
+        for (const [key, entry] of enquiryAttempts) {
+          if (entry.windowStartedAt <= now - ENQUIRY_WINDOW_MS) enquiryAttempts.delete(key);
+        }
+      }
+    }
+
+    if (attempts <= ENQUIRY_MAX_SUBMISSIONS) return 0;
+    return Math.max(1, Math.ceil((windowStartedAt + ENQUIRY_WINDOW_MS - now) / 1000));
+  },
+
   async updateEnquiryStatus(
     id: string,
     status: PatientEnquiry['status'],
@@ -390,13 +446,76 @@ export const DataStore = {
   },
 
   async changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
-    return mutateDatabase((database) => {
+    const changed = await mutateDatabase((database) => {
       if (!isPasswordMatch(currentPassword, database.adminSalt, database.adminPasswordHash)) return false;
       const salt = generateSalt();
       database.adminSalt = salt;
       database.adminPasswordHash = hashPassword(newPassword, salt);
       return true;
     });
+    if (changed) {
+      if (d1Config) {
+        await queryD1(d1Config, 'DELETE FROM orthocare_clinic_sessions');
+      } else {
+        activeSessions.clear();
+      }
+    }
+    return changed;
+  },
+
+  async getLoginRetryAfter(clientKey: string): Promise<number> {
+    const keyHash = hashSessionToken(`admin-login:${clientKey}`);
+    let lockedUntil: number | undefined;
+    if (d1Config) {
+      const { results } = await queryD1<{ locked_until: number }>(
+        d1Config,
+        'SELECT locked_until FROM orthocare_clinic_login_attempts WHERE ip_hash = ?',
+        [keyHash]
+      );
+      lockedUntil = results[0]?.locked_until;
+    } else {
+      lockedUntil = loginAttempts.get(keyHash)?.lockedUntil;
+    }
+    return lockedUntil ? Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
+  },
+
+  async recordLoginFailure(clientKey: string): Promise<number> {
+    const keyHash = hashSessionToken(`admin-login:${clientKey}`);
+    const now = Date.now();
+    if (d1Config) {
+      await queryD1(
+        d1Config,
+        `INSERT INTO orthocare_clinic_login_attempts (ip_hash, window_started_at, attempts, locked_until)
+         VALUES (?, ?, 1, 0)
+         ON CONFLICT(ip_hash) DO UPDATE SET
+           attempts = CASE WHEN window_started_at <= ? THEN 1 ELSE attempts + 1 END,
+           window_started_at = CASE WHEN window_started_at <= ? THEN excluded.window_started_at ELSE window_started_at END,
+           locked_until = CASE
+             WHEN window_started_at <= ? THEN 0
+             WHEN attempts + 1 >= ? THEN excluded.window_started_at + ?
+             ELSE locked_until
+           END`,
+        [keyHash, now, now - LOGIN_WINDOW_MS, now - LOGIN_WINDOW_MS, now - LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS]
+      );
+    } else {
+      const current = loginAttempts.get(keyHash);
+      if (!current || current.windowStartedAt <= now - LOGIN_WINDOW_MS) {
+        loginAttempts.set(keyHash, { windowStartedAt: now, attempts: 1, lockedUntil: 0 });
+      } else {
+        current.attempts += 1;
+        if (current.attempts >= LOGIN_MAX_ATTEMPTS) current.lockedUntil = current.windowStartedAt + LOGIN_WINDOW_MS;
+      }
+    }
+    return this.getLoginRetryAfter(clientKey);
+  },
+
+  async clearLoginFailures(clientKey: string): Promise<void> {
+    const keyHash = hashSessionToken(`admin-login:${clientKey}`);
+    if (d1Config) {
+      await queryD1(d1Config, 'DELETE FROM orthocare_clinic_login_attempts WHERE ip_hash = ?', [keyHash]);
+    } else {
+      loginAttempts.delete(keyHash);
+    }
   },
 
   async createSession(): Promise<string> {

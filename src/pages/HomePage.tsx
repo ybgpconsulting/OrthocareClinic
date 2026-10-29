@@ -19,6 +19,7 @@ import {
   HeartPulse,
 } from 'lucide-react';
 import { WhatsAppIcon } from '../components/WhatsAppIcon';
+import { ResponsiveImage } from '../components/ResponsiveImage';
 
 export function HomePage() {
   const {
@@ -154,11 +155,11 @@ export function HomePage() {
           {/* Right Hero Visual Column */}
           <div className="lg:col-span-5 flex flex-col justify-center">
             <div className="relative rounded-3xl overflow-hidden shadow-lg border border-slate-200/90 bg-slate-100 aspect-4/3 lg:h-full">
-              <img
+              <ResponsiveImage
                 src={heroImage}
                 alt="Front entrance and signboard of Orthocare Physiotherapy Clinic on Main Road, Tatiri, Baghpat"
-                referrerPolicy="no-referrer"
-                fetchPriority="high"
+                priority
+                sizes="(min-width: 1024px) 40vw, 100vw"
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-transparent flex flex-col justify-end p-5 sm:p-6 text-white">
@@ -384,10 +385,10 @@ export function HomePage() {
             
             <div className="lg:col-span-5">
               <div className="relative rounded-3xl overflow-hidden shadow-md border border-slate-200 aspect-4/3 bg-white">
-                <img
+                <ResponsiveImage
                   src={doctorPhoto}
                   alt="Dr. Harshit Jain consulting patient on spine and joint posture"
-                  referrerPolicy="no-referrer"
+                  sizes="(min-width: 1024px) 42vw, 100vw"
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -489,10 +490,10 @@ export function HomePage() {
               className="group relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 aspect-4/3 cursor-pointer shadow-xs hover:shadow-md transition-all"
               onClick={() => setActiveView('gallery')}
             >
-              <img
+              <ResponsiveImage
                 src={item.url}
                 alt={item.alt || item.title}
-                referrerPolicy="no-referrer"
+                sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-3.5 text-white">

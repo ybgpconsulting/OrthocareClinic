@@ -4,12 +4,73 @@ import { pathToFileURL } from 'node:url';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { build } from 'esbuild';
+import type { ClinicSettings } from '../src/types';
+import { getWeeklyHours, WEEKDAYS } from '../src/utils/openingHours';
 
 const outputDirectory = path.resolve('dist');
 const prerenderBundle = path.resolve(`.prerender-entry-${process.pid}.mjs`);
 const bootstrapData = JSON.parse(
   await readFile(path.resolve('public/site-data.json'), 'utf8')
 );
+
+function getClinicStructuredData(settings: ClinicSettings) {
+  const daySchemaUrls = new Map(
+    WEEKDAYS.map(({ id, label }) => [id, `https://schema.org/${label}`])
+  );
+  const openingHoursSpecification = getWeeklyHours(settings).flatMap((day) => {
+    if (day.isClosed) return [];
+    return day.intervals.map(({ open, close }) => ({
+      '@type': 'OpeningHoursSpecification',
+      dayOfWeek: daySchemaUrls.get(day.day),
+      opens: open,
+      closes: close,
+    }));
+  });
+  const phoneDigits = settings.phone.replace(/\D/g, '');
+  const telephone = phoneDigits.startsWith('91') ? `+${phoneDigits}` : `+91${phoneDigits}`;
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebSite',
+        '@id': 'https://orthocareclinic.in/#website',
+        url: 'https://orthocareclinic.in/',
+        name: settings.clinicName,
+        inLanguage: ['en-IN', 'hi-IN'],
+        publisher: { '@id': 'https://orthocareclinic.in/#clinic' },
+      },
+      {
+        '@type': 'MedicalClinic',
+        '@id': 'https://orthocareclinic.in/#clinic',
+        name: settings.clinicName,
+        description: `Physiotherapy and rehabilitation care at ${settings.address}.`,
+        medicalSpecialty: 'Physiotherapy',
+        url: 'https://orthocareclinic.in/',
+        image: 'https://orthocareclinic.in/images/orthocare-clinic-front.png',
+        logo: 'https://orthocareclinic.in/logos/orthocare-logo-horizontal.jpg',
+        telephone,
+        email: settings.email,
+        hasMap: settings.googleMapsUrl,
+        address: {
+          '@type': 'PostalAddress',
+          streetAddress: settings.address,
+          addressLocality: settings.city,
+          addressRegion: settings.state,
+          postalCode: settings.pincode,
+          addressCountry: 'IN',
+        },
+        openingHoursSpecification,
+        employee: {
+          '@type': 'Person',
+          name: settings.doctorName,
+          jobTitle: 'Physiotherapist',
+          description: settings.doctorQualifications,
+        },
+      },
+    ],
+  };
+}
 
 await build({
   entryPoints: ['scripts/prerender-entry.ts'],
@@ -34,6 +95,9 @@ try {
       React.createElement(App, { initialData, initialView: view })
     );
     const bootstrap = JSON.stringify({ initialView: view, initialData }).replace(/</g, '\\u003c');
+    const schemaJson = initialData
+      ? JSON.stringify(getClinicStructuredData(initialData.settings as ClinicSettings)).replace(/</g, '\\u003c')
+      : null;
     if (!template.includes('<div id="root"></div>')) {
       throw new Error('Production HTML template is missing the application root');
     }
@@ -71,6 +135,12 @@ try {
       .replace(
         /<meta name="twitter:description" content="[^"]*" \/>/,
         `<meta name="twitter:description" content="${metadata.description}" />`
+      )
+      .replace(
+        /<script type="application\/ld\+json">[\s\S]*?<\/script>/,
+        schemaJson
+          ? `<script type="application/ld+json">${schemaJson}</script>`
+          : ''
       )
       .replace(
         '</head>',

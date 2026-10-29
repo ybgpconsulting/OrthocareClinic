@@ -4,6 +4,21 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { DataStore } from './server/dataStore';
+import { getAdminPasswordPolicyError } from './src/authPolicy';
+import {
+  categoryRules,
+  contentRules,
+  deleteCategoryRules,
+  enquiryRules,
+  enquiryStatusRules,
+  faqRules,
+  galleryRules,
+  loginRules,
+  passwordChangeRules,
+  serviceRules,
+  settingsRules,
+  validatePayload,
+} from './src/apiValidation';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,10 +26,35 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
+const ADMIN_SESSION_COOKIE = '__Host-orthocare_admin';
+const ADMIN_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-// Request body parsers (supports base64 image uploads up to 25MB)
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(express.json({ limit: '512kb' }));
+app.use(express.urlencoded({ extended: true, limit: '512kb' }));
+
+app.use((req, res, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) || !req.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+  const origin = req.get('origin');
+  if (!origin) {
+    next();
+    return;
+  }
+  try {
+    const forwardedProtocol = req.get('x-forwarded-proto')?.split(',')[0].trim();
+    const expectedOrigin = `${forwardedProtocol || req.protocol}://${req.get('host')}`;
+    if (new URL(origin).origin !== expectedOrigin) {
+      res.status(403).json({ error: 'Cross-origin requests are not allowed.' });
+      return;
+    }
+  } catch {
+    res.status(403).json({ error: 'Cross-origin requests are not allowed.' });
+    return;
+  }
+  next();
+});
 
 // Serve uploaded files statically
 const publicUploads = path.resolve(__dirname, 'public', 'uploads');
@@ -24,9 +64,31 @@ if (!fs.existsSync(publicUploads)) {
 app.use('/uploads', express.static(publicUploads));
 
 // Auth Middleware
+function getSessionToken(req: Request): string | undefined {
+  const session = req.headers.cookie
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${ADMIN_SESSION_COOKIE}=`))
+    ?.slice(ADMIN_SESSION_COOKIE.length + 1);
+  return session && /^[0-9a-f]{64}$/i.test(session) ? session : undefined;
+}
+
+function setSessionCookie(res: Response, token: string): void {
+  res.setHeader(
+    'Set-Cookie',
+    `${ADMIN_SESSION_COOKIE}=${token}; Path=/; Max-Age=${ADMIN_SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Strict`
+  );
+}
+
+function clearSessionCookie(res: Response): void {
+  res.setHeader(
+    'Set-Cookie',
+    `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
+  );
+}
+
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  const token = getSessionToken(req);
 
   void DataStore.validateSession(token).then((isValid) => {
     if (!isValid) {
@@ -52,24 +114,42 @@ app.get('/api/health', (_req, res) => {
 
 // Authentication
 app.post('/api/auth/login', asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, loginRules, ['password']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { password } = req.body;
-  if (!password) {
-    return res.status(400).json({ error: 'Password is required' });
+
+  const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+  const retryAfter = await DataStore.getLoginRetryAfter(clientKey);
+  if (retryAfter > 0) {
+    res.setHeader('Retry-After', String(retryAfter));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(429).json({ error: 'Too many unsuccessful login attempts. Please try again later.' });
   }
 
   const isValid = await DataStore.verifyPassword(password);
   if (!isValid) {
+    const failureRetryAfter = await DataStore.recordLoginFailure(clientKey);
+    if (failureRetryAfter > 0) {
+      res.setHeader('Retry-After', String(failureRetryAfter));
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(429).json({ error: 'Too many unsuccessful login attempts. Please try again later.' });
+    }
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(401).json({ error: 'Invalid password. Please enter the correct admin password.' });
   }
 
+  await DataStore.clearLoginFailures(clientKey);
   const token = await DataStore.createSession();
-  res.json({ success: true, token, message: 'Logged in successfully' });
+  res.setHeader('Cache-Control', 'no-store');
+  setSessionCookie(res, token);
+  res.json({ success: true, message: 'Logged in successfully' });
 }));
 
 app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+  const token = getSessionToken(req);
   void DataStore.destroySession(token).then(() => {
+    clearSessionCookie(res);
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ success: true, message: 'Logged out successfully' });
   }).catch((error) => {
     console.error('Failed to destroy admin session:', error);
@@ -78,27 +158,27 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.get('/api/auth/me', asyncHandler(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+  const token = getSessionToken(req);
   const isValid = await DataStore.validateSession(token);
+  res.setHeader('Cache-Control', 'no-store');
   res.json({ authenticated: isValid });
 }));
 
 app.post('/api/auth/change-password', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, passwordChangeRules, ['currentPassword', 'newPassword']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'Current and new password are required' });
-  }
-  if (newPassword.length < 6) {
-    return res.status(400).json({ error: 'New password must be at least 6 characters' });
-  }
+  const passwordError = getAdminPasswordPolicyError(newPassword);
+  if (passwordError) return res.status(400).json({ error: passwordError });
 
   const changed = await DataStore.changePassword(currentPassword, newPassword);
   if (!changed) {
     return res.status(400).json({ error: 'Current password was incorrect' });
   }
 
-  res.json({ success: true, message: 'Admin password updated successfully' });
+  clearSessionCookie(res);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, message: 'Admin password updated successfully. Please sign in again.' });
 }));
 
 // Settings
@@ -107,6 +187,8 @@ app.get('/api/settings', asyncHandler(async (_req, res) => {
 }));
 
 app.put('/api/settings', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, settingsRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateSettings(req.body);
   res.json({ success: true, settings: updated });
 }));
@@ -117,6 +199,8 @@ app.get('/api/content', asyncHandler(async (_req, res) => {
 }));
 
 app.put('/api/content', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, contentRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateContent(req.body);
   res.json({ success: true, content: updated });
 }));
@@ -127,8 +211,9 @@ app.get('/api/categories', asyncHandler(async (_req, res) => {
 }));
 
 app.post('/api/categories', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, categoryRules, ['name']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { name, nameHi, order, description } = req.body;
-  if (!name) return res.status(400).json({ error: 'Category name is required' });
   const created = await DataStore.addCategory({
     name,
     nameHi: nameHi || name,
@@ -139,12 +224,16 @@ app.post('/api/categories', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 app.put('/api/categories/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, categoryRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateCategory(req.params.id, req.body);
   if (!updated) return res.status(404).json({ error: 'Category not found' });
   res.json(updated);
 }));
 
 app.delete('/api/categories/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, deleteCategoryRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { fallbackCategoryId } = req.body || {};
   const success = await DataStore.deleteCategory(req.params.id, fallbackCategoryId);
   if (!success) return res.status(404).json({ error: 'Category not found' });
@@ -154,22 +243,20 @@ app.delete('/api/categories/:id', requireAdmin, asyncHandler(async (req, res) =>
 // Services
 app.get('/api/services', asyncHandler(async (req, res) => {
   const includeHidden = req.query.all === 'true';
-  // If requesting hidden, check admin token
   if (includeHidden) {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
-    if (await DataStore.validateSession(token)) {
-      return res.json(await DataStore.getServices(true));
+    const token = getSessionToken(req);
+    if (!await DataStore.validateSession(token)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin session required or expired' });
     }
+    return res.json(await DataStore.getServices(true));
   }
   res.json(await DataStore.getServices(false));
 }));
 
 app.post('/api/services', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, serviceRules, ['name', 'categoryId', 'description']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { name, categoryId, description } = req.body;
-  if (!name || !categoryId || !description) {
-    return res.status(400).json({ error: 'Name, category and description are required' });
-  }
   const created = await DataStore.addService({
     name,
     nameHi: req.body.nameHi || name,
@@ -190,6 +277,8 @@ app.post('/api/services', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 app.put('/api/services/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, serviceRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateService(req.params.id, req.body);
   if (!updated) return res.status(404).json({ error: 'Service not found' });
   res.json(updated);
@@ -205,20 +294,19 @@ app.delete('/api/services/:id', requireAdmin, asyncHandler(async (req, res) => {
 app.get('/api/gallery', asyncHandler(async (req, res) => {
   const includeHidden = req.query.all === 'true';
   if (includeHidden) {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
-    if (await DataStore.validateSession(token)) {
-      return res.json(await DataStore.getGallery(true));
+    const token = getSessionToken(req);
+    if (!await DataStore.validateSession(token)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin session required or expired' });
     }
+    return res.json(await DataStore.getGallery(true));
   }
   res.json(await DataStore.getGallery(false));
 }));
 
 app.post('/api/gallery', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, galleryRules, ['title', 'url']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { title, url, category, alt, caption } = req.body;
-  if (!title || !url) {
-    return res.status(400).json({ error: 'Title and image URL are required' });
-  }
   const created = await DataStore.addGalleryItem({
     title,
     category: category || 'rehabilitation',
@@ -232,6 +320,8 @@ app.post('/api/gallery', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 app.put('/api/gallery/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, galleryRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateGalleryItem(req.params.id, req.body);
   if (!updated) return res.status(404).json({ error: 'Gallery item not found' });
   res.json(updated);
@@ -247,20 +337,19 @@ app.delete('/api/gallery/:id', requireAdmin, asyncHandler(async (req, res) => {
 app.get('/api/faqs', asyncHandler(async (req, res) => {
   const includeHidden = req.query.all === 'true';
   if (includeHidden) {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
-    if (await DataStore.validateSession(token)) {
-      return res.json(await DataStore.getFAQs(true));
+    const token = getSessionToken(req);
+    if (!await DataStore.validateSession(token)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin session required or expired' });
     }
+    return res.json(await DataStore.getFAQs(true));
   }
   res.json(await DataStore.getFAQs(false));
 }));
 
 app.post('/api/faqs', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, faqRules, ['question', 'answer']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { question, answer, category, order } = req.body;
-  if (!question || !answer) {
-    return res.status(400).json({ error: 'Question and answer are required' });
-  }
   const created = await DataStore.addFAQ({
     question,
     questionHi: req.body.questionHi || question,
@@ -274,6 +363,8 @@ app.post('/api/faqs', requireAdmin, asyncHandler(async (req, res) => {
 }));
 
 app.put('/api/faqs/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, faqRules);
+  if (validationError) return res.status(400).json({ error: validationError });
   const updated = await DataStore.updateFAQ(req.params.id, req.body);
   if (!updated) return res.status(404).json({ error: 'FAQ not found' });
   res.json(updated);
@@ -287,25 +378,44 @@ app.delete('/api/faqs/:id', requireAdmin, asyncHandler(async (req, res) => {
 
 // Enquiries
 app.post('/api/enquiries', asyncHandler(async (req, res) => {
-  const { patientName, phoneNumber, serviceRequested, preferredDate, preferredTimeSlot, message, isHomeVisitRequested } = req.body;
-
-  // Validation
-  if (!patientName || typeof patientName !== 'string' || patientName.trim().length < 2) {
-    return res.status(400).json({ error: 'Please provide a valid patient name' });
+  const validationError = validatePayload(req.body, enquiryRules, ['patientName', 'phoneNumber']);
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { patientName, phoneNumber, serviceRequested, preferredDate, preferredTimeSlot, message, isHomeVisitRequested, website } = req.body;
+  if (typeof website === 'string' && website.trim()) {
+    return res.status(400).json({ error: 'Unable to submit enquiry. Please review the form and try again.' });
   }
-  const cleanPhone = (phoneNumber || '').replace(/\D/g, '');
-  if (cleanPhone.length < 10) {
+  if (!/^[+\d\s().-]+$/.test(phoneNumber)) {
     return res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
+  }
+  const submittedDigits = phoneNumber.replace(/\D/g, '');
+  const cleanPhone = submittedDigits.length === 12 && submittedDigits.startsWith('91')
+    ? submittedDigits.slice(2)
+    : submittedDigits.length === 11 && submittedDigits.startsWith('0')
+      ? submittedDigits.slice(1)
+      : submittedDigits;
+  if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+    return res.status(400).json({ error: 'Please provide a valid 10-digit mobile number' });
+  }
+
+  const rateLimitRetryAfter = await DataStore.consumeEnquirySubmission(
+    req.ip || req.socket.remoteAddress || 'unknown'
+  );
+  if (rateLimitRetryAfter > 0) {
+    res.setHeader('Retry-After', String(rateLimitRetryAfter));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(429).json({
+      error: 'Too many enquiries have been submitted from this connection. Please try again later.',
+    });
   }
 
   const created = await DataStore.addEnquiry({
     patientName: patientName.trim(),
     phoneNumber: cleanPhone,
-    serviceRequested: serviceRequested || 'General Physiotherapy Consultation',
+    serviceRequested: serviceRequested?.trim() || 'General Physiotherapy Consultation',
     preferredDate: preferredDate || '',
     preferredTimeSlot: preferredTimeSlot || '',
-    message: message || '',
-    isHomeVisitRequested: Boolean(isHomeVisitRequested)
+    message: message?.trim() || '',
+    isHomeVisitRequested: isHomeVisitRequested === true
   });
 
   res.status(201).json({
@@ -320,8 +430,9 @@ app.get('/api/enquiries', requireAdmin, asyncHandler(async (_req, res) => {
 }));
 
 app.patch('/api/enquiries/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const validationError = validatePayload(req.body, enquiryStatusRules, ['status']);
+  if (validationError) return res.status(400).json({ error: validationError });
   const { status, internalNotes } = req.body;
-  if (!status) return res.status(400).json({ error: 'Status is required' });
   const updated = await DataStore.updateEnquiryStatus(req.params.id, status, internalNotes);
   if (!updated) return res.status(404).json({ error: 'Enquiry not found' });
   res.json(updated);
@@ -333,19 +444,10 @@ app.delete('/api/enquiries/:id', requireAdmin, asyncHandler(async (req, res) => 
   res.json({ success: true });
 }));
 
-// File upload endpoint (Admin only)
-app.post('/api/upload', requireAdmin, (req, res) => {
-  const { fileData, fileName } = req.body;
-  if (!fileData) {
-    return res.status(400).json({ error: 'File data is required' });
-  }
-
-  try {
-    const url = DataStore.saveUploadedImage(fileData, fileName || 'upload.jpg');
-    res.json({ success: true, url });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to upload image' });
-  }
+app.post('/api/upload', requireAdmin, (_req, res) => {
+  res.status(503).json({
+    error: 'Image uploads are temporarily unavailable. Use an existing static image path from /images/.',
+  });
 });
 
 // Admin Dashboard Stats
@@ -372,6 +474,17 @@ app.get('/api/stats', requireAdmin, asyncHandler(async (_req, res) => {
 
 app.use('/api', (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error('API request failed:', error);
+  const status = error && typeof error === 'object' && 'status' in error
+    ? Number((error as { status?: unknown }).status)
+    : 0;
+  if (status === 413) {
+    res.status(413).json({ error: 'Request body exceeds the allowed size.' });
+    return;
+  }
+  if (status === 400) {
+    res.status(400).json({ error: 'Request body must contain valid JSON.' });
+    return;
+  }
   res.status(500).json({ error: 'The request could not be completed. Please try again.' });
 });
 

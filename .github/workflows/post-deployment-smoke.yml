@@ -1,0 +1,82 @@
+name: Post-deployment smoke tests
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment environment to validate
+        type: choice
+        options: [staging, production]
+        required: true
+      url:
+        description: Optional URL override; otherwise use the deployment URL or repository variable
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-smoke-${{ github.event.deployment.environment || inputs.target || 'manual' }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'deployment_status' &&
+       github.event.deployment_status.state == 'success' &&
+       (contains(github.event.deployment.environment, 'staging') ||
+        contains(github.event.deployment.environment, 'production')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve deployment URL
+        id: target
+        env:
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_URL: ${{ inputs.url }}
+          DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment }}
+          DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
+          STAGING_URL: ${{ vars.STAGING_BASE_URL }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          set -euo pipefail
+          target="${INPUT_TARGET:-}"
+          if [ -z "$target" ]; then
+            environment="$(printf '%s' "$DEPLOYMENT_ENVIRONMENT" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$environment" == *staging* ]]; then
+              target=staging
+            elif [[ "$environment" == *production* ]]; then
+              target=production
+            else
+              echo "Unsupported deployment environment: $DEPLOYMENT_ENVIRONMENT" >&2
+              exit 1
+            fi
+          fi
+          case "$target" in
+            staging) configured_url="$STAGING_URL" ;;
+            production) configured_url="$PRODUCTION_URL" ;;
+            *) echo "Unsupported target: $target" >&2; exit 1 ;;
+          esac
+          base_url="${INPUT_URL:-${DEPLOYMENT_URL:-$configured_url}}"
+          if [ -z "$base_url" ]; then
+            echo "Set the $target URL in workflow_dispatch or the matching repository variable." >&2
+            exit 1
+          fi
+          if [[ "$base_url" == *$'\n'* || "$base_url" == *$'\r'* ]]; then
+            echo "Deployment URL must be a single line." >&2
+            exit 1
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "base_url=$base_url" >> "$GITHUB_OUTPUT"
+          echo "Validating $target deployment."
+      - name: Run post-deployment checks
+        env:
+          SMOKE_BASE_URL: ${{ steps.target.outputs.base_url }}
+        run: node scripts/smoke-test.mjs

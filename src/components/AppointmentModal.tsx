@@ -3,6 +3,7 @@ import { useClinic } from '../context/ClinicContext';
 import { api } from '../api';
 import { X, Calendar, Phone, CheckCircle2, AlertCircle, Home, Clock } from 'lucide-react';
 import { WhatsAppIcon } from './WhatsAppIcon';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 
 export function AppointmentModal() {
   const {
@@ -22,58 +23,18 @@ export function AppointmentModal() {
   const [preferredTimeSlot, setPreferredTimeSlot] = useState('Morning (9:00 AM – 1:30 PM)');
   const [isHomeVisitRequested, setIsHomeVisitRequested] = useState(false);
   const [message, setMessage] = useState('');
+  const [website, setWebsite] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!isAppointmentModalOpen) return;
-
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    const getFocusableElements = () =>
-      Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        ) || []
-      ).filter((element) => element.getClientRects().length > 0);
-
-    document.body.style.overflow = 'hidden';
-    const firstField = dialogRef.current?.querySelector<HTMLElement>(
-      'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
-    );
-    (firstField || getFocusableElements()[0])?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setIsAppointmentModalOpen(false);
-        return;
-      }
-
-      if (event.key !== 'Tab') return;
-      const focusableElements = getFocusableElements();
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      if (!firstElement || !lastElement) return;
-
-      if (event.shiftKey && document.activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [isAppointmentModalOpen, setIsAppointmentModalOpen]);
+  useDialogFocus(
+    isAppointmentModalOpen,
+    dialogRef,
+    () => setIsAppointmentModalOpen(false),
+    'input:not([type="hidden"]):not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled])',
+  );
 
   useEffect(() => {
     if (prefilledServiceName) {
@@ -109,6 +70,7 @@ export function AppointmentModal() {
         preferredTimeSlot,
         message,
         isHomeVisitRequested,
+        website,
       });
 
       setIsSuccess(true);
@@ -125,6 +87,7 @@ export function AppointmentModal() {
     setPatientName('');
     setPhoneNumber('');
     setMessage('');
+    setWebsite('');
     setIsHomeVisitRequested(false);
     setIsAppointmentModalOpen(false);
   };
@@ -197,6 +160,16 @@ export function AppointmentModal() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
+                <input
+                  type="text"
+                  name="website"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={website}
+                  onChange={(event) => setWebsite(event.target.value)}
+                />
+              </div>
               {/* WhatsApp option before appointment details */}
               <div className="text-center">
                 <p className="text-xs text-slate-500 mb-2">Prefer instant confirmation?</p>
@@ -235,6 +208,7 @@ export function AppointmentModal() {
                   id="appointment-patient-name"
                   type="text"
                   required
+                  maxLength={120}
                   value={patientName}
                   onChange={(e) => setPatientName(e.target.value)}
                   placeholder="e.g. Ramesh Kumar"
@@ -255,7 +229,7 @@ export function AppointmentModal() {
                     id="appointment-phone"
                     type="tel"
                     required
-                    maxLength={10}
+                    maxLength={24}
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
                     placeholder="8864849409"
@@ -347,6 +321,7 @@ export function AppointmentModal() {
                 <textarea
                   id="appointment-message"
                   rows={2}
+                  maxLength={2000}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="e.g. Pain since 2 weeks, difficulty climbing stairs..."
