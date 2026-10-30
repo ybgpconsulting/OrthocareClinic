@@ -1,12 +1,12 @@
-import seedData from '../../public/site-data.json';
+import seedData from '../public/site-data.json';
 import type {
   FAQItem,
   GalleryItem,
   PatientEnquiry,
   ServiceCategory,
   TreatmentService,
-} from '../../src/types';
-import { getAdminPasswordPolicyError } from '../../src/authPolicy';
+} from '../src/types';
+import { getAdminPasswordPolicyError } from '../src/authPolicy';
 import {
   categoryRules,
   contentRules,
@@ -20,7 +20,7 @@ import {
   serviceRules,
   settingsRules,
   validatePayload,
-} from '../../src/apiValidation';
+} from '../src/apiValidation';
 
 interface D1Result<T = unknown> {
   results?: T[];
@@ -40,7 +40,7 @@ interface D1Database {
   batch<T = unknown>(statements: D1Statement[]): Promise<D1Result<T>[]>;
 }
 
-interface Env {
+export interface Env {
   DB: D1Database;
   ADMIN_INITIAL_PASSWORD?: string;
 }
@@ -317,7 +317,7 @@ async function ensureState(env: Env): Promise<void> {
 
   const password = env.ADMIN_INITIAL_PASSWORD;
   if (!password || getAdminPasswordPolicyError(password)) {
-    throw new Error('Set ADMIN_INITIAL_PASSWORD as a Cloudflare Pages secret (15-128 characters) before initializing D1.');
+    throw new Error('Set ADMIN_INITIAL_PASSWORD as a Cloudflare Worker secret (15-128 characters) before initializing D1.');
   }
 
   const salt = randomHex(16);
@@ -1245,7 +1245,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
   return json({ error: 'API route not found' }, 404);
 }
 
-export async function onRequest({ request, env }: { request: Request; env: Env }): Promise<Response> {
+export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   let response: Response;
   try {
     response = await handleApi(request, env);

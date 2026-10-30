@@ -1,6 +1,6 @@
 # Orthocare Physiotherapy Clinic
 
-A React and Vite website with Cloudflare Pages Functions and D1 for production.
+A React and Vite website deployed to Cloudflare Workers with static assets and D1.
 The Express API and `data/clinic_data.json` remain available for local Node.js
 development.
 
@@ -27,35 +27,32 @@ Responsive WebP derivatives for the static clinic photos are stored in
 replacing or adding a source photo, regenerate derivatives with
 `npm run images:optimize`.
 
-## Cloudflare Pages deployment
+## Cloudflare Workers deployment
 
-The Cloudflare deployment uses native Pages Functions bindings—no Cloudflare
+The Cloudflare deployment uses native Workers bindings—no Cloudflare
 API token or account ID is embedded in source code. `wrangler.toml` is
-configured for the Pages project and existing D1 database:
+configured for the Worker and existing D1 database:
 
+- Worker: `orthocareclinic`
 - D1 binding: `DB`
 - Database: `orthocareclinic`
 - Database ID: `bb1485a9-0b59-41b4-abf2-d4a7ca1e8f2d`
 
 ### One-time Cloudflare setup
 
-1. The Pages project is named `orthocareclinic`, with `main` as its production
-   branch. For Git-connected builds, set the build command to `npm run build`
-   and the output directory to `dist`.
-2. In Pages **Settings → Functions → D1 database bindings**, bind `DB` to the
-   existing `orthocareclinic` database.
-3. Before the first API request against an empty D1 database, set the Pages
+1. Authenticate Wrangler with the Cloudflare account that owns the existing
+   D1 database.
+2. Before the first API request against an empty D1 database, set the Worker
    secret `ADMIN_INITIAL_PASSWORD` in the Cloudflare dashboard. Alternatively,
-   run `npx wrangler pages secret put ADMIN_INITIAL_PASSWORD --project-name orthocareclinic`
+   run `npx wrangler secret put ADMIN_INITIAL_PASSWORD --name orthocareclinic`
    and enter the value at the prompt. Use a unique password of 15-128
    characters. It is only used to seed a new empty D1 state; it does not reset
    an existing administrator password. Do not send the password in chat or
    commit it to the repository.
-4. Apply pending D1 migrations after authenticating Wrangler with the correct
+3. Apply pending D1 migrations after authenticating Wrangler with the correct
    Cloudflare account: `npx wrangler login`, then `npm run cf:d1:remote`.
-5. Configure the D1 binding and initial admin secret for **Production** and
-   **Preview** as needed. Use a separate test D1 database for preview
-   deployments to avoid changing production data.
+4. Configure a separate test D1 database for non-production deployments to
+   avoid changing production data.
 
 Admin sessions use an `HttpOnly`, `Secure`, `SameSite=Strict` cookie and are
 never accepted from URL parameters or authorization headers. Login attempts
@@ -67,11 +64,11 @@ intentionally left unchanged while evaluating a secure design compatible
 with the selected Workers Free CPU budget; production CPU compatibility has
 not been measured. This is a weak work factor and remains a known offline
 password-cracking risk. The stronger KDF upgrade is deferred until a secure
-design is confirmed against the account's actual Pages CPU budget. Use a
+design is confirmed against the account's actual Workers CPU budget. Use a
 unique, high-entropy password, and do not treat the current hash as equivalent
 to a modern high-work-factor password hash.
 
-The Pages Functions expose the existing `/api/*` endpoints, persist clinic
+The Worker exposes the existing `/api/*` endpoints, persists clinic
 content, enquiries, and hashed admin sessions in D1. Image upload is
 intentionally deferred; the compatible `/api/upload` endpoint returns HTTP 503
 with instructions instead of storing an image or pretending the upload
@@ -85,7 +82,7 @@ submissions per IP in a 15-minute window. D1 stores only a SHA-256 hash of the
 client IP for that rate limit; migration `0004_enquiry_rate_limits.sql` creates
 the rate-limit table. JSON request bodies are capped at 512 KiB.
 Mutation requests require a same-origin `Origin` header. API responses use
-`Cache-Control: no-store`; static Pages responses include a restrictive
+`Cache-Control: no-store`; static asset responses include a restrictive
 Content Security Policy and security headers. Administrator enquiry lists
 are loaded using indexed, cursor-based pages of 50 records (maximum 100).
 D1 is initialized lazily on the first API request after the migration and
@@ -132,7 +129,7 @@ legacy snapshot and backup until post-deployment checks pass. Do not roll back
 to the old application after normalized writes begin unless those writes have
 also been exported or reverse-migrated.
 
-After migration, Pages Functions write clinic records through revision-checked
+After migration, the Worker writes clinic records through revision-checked
 D1 batches and store enquiries directly as indexed rows. Enquiry lists use
 cursor pagination instead of returning the full enquiry history. Apply all
 pending migrations, including `0004_enquiry_rate_limits.sql`,
@@ -143,7 +140,7 @@ it also updates the address only when it exactly matches the previous seed
 address. Other customized D1 settings are preserved.
 
 The health endpoint verifies that the complete D1 schema is present and returns
-HTTP 503 when required migrations are missing. The Pages integration test starts from a synthetic legacy `0001` database,
+HTTP 503 when required migrations are missing. The Worker integration test starts from a synthetic legacy `0001` database,
 applies every migration, checks that legacy content and enquiries remain
 readable, and exercises cookie authentication, password rotation and session
 revocation, rate limits, and cursor pagination. It also checks first-admin
@@ -160,35 +157,38 @@ npm run cf:d1:local
 npm run cf:dev
 ```
 
-This builds the prerendered site and starts Cloudflare Pages Functions locally.
+This builds the prerendered site and starts the Worker locally.
 Local Wrangler data is stored in `.wrangler/` and is ignored by Git. The regular
 `npm run dev` command continues to use the Express server.
 
 ### Deploy from the command line
 
-After configuring the Pages project, D1 binding, and initial admin secret:
+After confirming the Cloudflare account, existing D1 database binding, and
+initial admin secret:
 
 ```sh
+npm run cf:check
 npm run cf:d1:remote
 npm run cf:deploy
 ```
 
-Git-connected Pages deployments can build automatically using the same build
-command and output directory.
+The deployment uses Workers Static Assets from `dist/`. No custom domain or
+route is configured by this repository; keep existing production routing
+unchanged unless a separate cutover is approved.
 
 ## Validation and production
 
 ```sh
 npm run lint
 npm run build
-npm run test:pages
+npm run test:worker
 npm run test:backup-restore
 ```
 
 ### CI, staging validation, monitoring, and recovery
 
 GitHub Actions runs the type-check, production build/prerender validation, a
-local Pages Functions + isolated D1 integration smoke test, and a synthetic
+local Workers runtime + isolated D1 integration smoke test, and a synthetic
 D1 backup/restore drill on pull requests and pushes to `main`. These checks
 use local temporary D1 databases only; they do not apply migrations to
 Cloudflare or read production data.
@@ -200,9 +200,9 @@ reads, and a responsive WebP asset after successful GitHub deployments whose
 environment names include `staging` or `production`. It can also be started
 manually from **Actions → Post-deployment smoke tests**, selecting the target
 environment; the configured URL is used unless a URL override is supplied.
-This supports Git-connected deployments without changing the existing Pages
-deployment or production domain. If deployment statuses are not connected to
-GitHub, run the staging workflow manually after each staging deployment.
+This supports Git-connected deployments without changing the production domain.
+If deployment statuses are not connected to GitHub, run the staging workflow
+manually after each staging deployment.
 
 The production availability workflow runs the same read-only smoke checks every
 15 minutes and can also be run manually. A failed check is visible as a failed
@@ -240,7 +240,7 @@ operator approval, record the recovery point, and take/export a fresh backup
 before using `npx wrangler d1 time-travel restore orthocareclinic --timestamp
 <RFC3339>`. If Time Travel cannot recover the desired point, use a separately
 created recovery database and a reviewed, verified export; validate it before
-changing the Pages D1 binding. Never import over the current production DB as
+changing the Worker D1 binding. Never import over the current production DB as
 a routine restore drill. Re-run the staging smoke test and verify clinic
 settings, services, gallery, FAQs, enquiry access, and administrator login
 before resuming writes.
@@ -291,7 +291,7 @@ uploaded patient images.
 ## Optional D1 REST storage for the local Express server
 
 The local Express server can optionally use the Cloudflare D1 REST API. This is
-separate from the native D1 binding used by Cloudflare Pages.
+separate from the native D1 binding used by Cloudflare Workers.
 Set these server-side environment variables (never expose them as `VITE_*`
 variables):
 
@@ -313,5 +313,5 @@ an explicit migration.
 When D1 is enabled, the server reads and writes clinic data through the
 Cloudflare D1 API. Keep the Cloudflare token in the hosting provider's secret
 manager. The local Express server's image uploader still uses `public/uploads/`; this
-is separate from Cloudflare Pages, where image uploads are deferred and
+is separate from Cloudflare Workers, where image uploads are deferred and
 existing public static assets remain available.

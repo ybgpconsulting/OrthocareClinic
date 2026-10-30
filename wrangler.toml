@@ -1,8 +1,14 @@
 name = "orthocareclinic"
-pages_build_output_dir = "./dist"
+main = "./worker/index.ts"
 compatibility_date = "2025-03-01"
 
-# Pages uses D1 for structured data; existing static images remain in public/.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+html_handling = "drop-trailing-slash"
+not_found_handling = "404-page"
+run_worker_first = ["/api", "/api/*"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "orthocareclinic"

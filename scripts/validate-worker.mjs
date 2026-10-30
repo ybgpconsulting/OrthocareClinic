@@ -9,13 +9,13 @@ import { runSmokeTest } from './smoke-test.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const wranglerCli = path.join(projectRoot, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
-const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'orthocare-pages-check-'));
+const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'orthocare-worker-check-'));
 const databaseDirectory = path.join(temporaryDirectory, 'd1');
 const databaseName = 'orthocareclinic';
 const adminPassword = `CI-only-${randomUUID()}-Aa9!`;
 const rotatedPassword = `Rotated-${randomUUID()}-LocalTest!`;
 const pageSize = 20;
-let pagesProcess;
+let workerProcess;
 
 function runWrangler(args) {
   return new Promise((resolve, reject) => {
@@ -43,11 +43,11 @@ async function getAvailablePort() {
   return port;
 }
 
-async function waitForPages(url, expectedHealthStatus = 200) {
+async function waitForWorker(url, expectedHealthStatus = 200) {
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    if (pagesProcess.exitCode !== null) {
-      throw new Error(`Pages dev exited early with code ${pagesProcess.exitCode}.`);
+    if (workerProcess.exitCode !== null) {
+      throw new Error(`Worker dev exited early with code ${workerProcess.exitCode}.`);
     }
     try {
       const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(2000) });
@@ -56,7 +56,7 @@ async function waitForPages(url, expectedHealthStatus = 200) {
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
   }
-  throw new Error('Pages dev did not become ready within 60 seconds.');
+  throw new Error('Worker dev did not become ready within 60 seconds.');
 }
 
 async function waitForProcessExit(process, timeoutMs) {
@@ -79,37 +79,37 @@ async function removeTemporaryDirectory() {
   }
 }
 
-async function startPages(databasePath, expectedHealthStatus = 200) {
+async function startWorker(databasePath, expectedHealthStatus = 200) {
   const port = await getAvailablePort();
-  pagesProcess = spawn(process.execPath, [
-    wranglerCli, 'pages', 'dev', 'dist',
+  workerProcess = spawn(process.execPath, [
+    wranglerCli, 'dev', '--local',
     '--ip', '127.0.0.1',
     '--port', String(port),
     '--persist-to', databasePath,
-    '--binding', `ADMIN_INITIAL_PASSWORD=${adminPassword}`,
+    '--var', `ADMIN_INITIAL_PASSWORD:${adminPassword}`,
   ], {
     cwd: projectRoot,
     stdio: 'inherit',
     env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
   });
   const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForPages(baseUrl, expectedHealthStatus);
+  await waitForWorker(baseUrl, expectedHealthStatus);
   return baseUrl;
 }
 
-async function stopPages() {
-  if (!pagesProcess || pagesProcess.exitCode !== null || pagesProcess.signalCode !== null) {
-    pagesProcess = undefined;
+async function stopWorker() {
+  if (!workerProcess || workerProcess.exitCode !== null || workerProcess.signalCode !== null) {
+    workerProcess = undefined;
     return;
   }
-  pagesProcess.kill('SIGTERM');
-  if (!(await waitForProcessExit(pagesProcess, 5000))) {
-    pagesProcess.kill('SIGKILL');
-    if (!(await waitForProcessExit(pagesProcess, 5000))) {
-      throw new Error('Could not stop the temporary Pages dev process.');
+  workerProcess.kill('SIGTERM');
+  if (!(await waitForProcessExit(workerProcess, 5000))) {
+    workerProcess.kill('SIGKILL');
+    if (!(await waitForProcessExit(workerProcess, 5000))) {
+      throw new Error('Could not stop the temporary Worker dev process.');
     }
   }
-  pagesProcess = undefined;
+  workerProcess = undefined;
 }
 
 function assert(condition, message) {
@@ -324,8 +324,8 @@ async function testAdminApi(baseUrl) {
   });
   const passwordVerificationTime = Date.now() - passwordVerificationStartedAt;
   await assertStatus(newLogin, 200, 'Login after password rotation');
-  assert(passwordVerificationTime < 5000, 'Password verification exceeded the local Pages test budget.');
-  console.log(`PASS legacy PBKDF2-HMAC-SHA-512 login (${passwordVerificationTime} ms in local Pages runtime)`);
+  assert(passwordVerificationTime < 5000, 'Password verification exceeded the local Worker test budget.');
+  console.log(`PASS legacy PBKDF2-HMAC-SHA-512 login (${passwordVerificationTime} ms in local Worker runtime)`);
   const newCookie = (newLogin.headers.get('set-cookie') || '').split(';', 1)[0];
   const logout = await request('/api/auth/logout', { method: 'POST', cookie: newCookie });
   await assertStatus(logout, 200, 'Session logout');
@@ -353,7 +353,7 @@ async function testFreshAdminInitialization(baseUrl) {
   const startedAt = Date.now();
   await runSmokeTest(baseUrl);
   const initializationTime = Date.now() - startedAt;
-  assert(initializationTime < 15000, 'Fresh D1 initialization exceeded the local Pages smoke-test budget.');
+  assert(initializationTime < 15000, 'Fresh D1 initialization exceeded the local Worker smoke-test budget.');
 
   const login = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
@@ -366,7 +366,7 @@ async function testFreshAdminInitialization(baseUrl) {
   await assertStatus(login, 200, 'First administrator login after empty-D1 initialization');
   const cookie = (login.headers.get('set-cookie') || '').split(';', 1)[0];
   assert(cookie.startsWith('__Host-orthocare_admin='), 'Fresh initialization must create a secure cookie session.');
-  console.log(`PASS secure first-admin initialization (${initializationTime} ms in local Pages runtime)`);
+  console.log(`PASS secure first-admin initialization (${initializationTime} ms in local Worker runtime)`);
 }
 
 try {
@@ -420,20 +420,20 @@ try {
     '--local', '--persist-to', databaseDirectory,
   ]);
 
-  const baseUrl = await startPages(databaseDirectory);
+  const baseUrl = await startWorker(databaseDirectory);
   await runSmokeTest(baseUrl);
   await testAdminApi(baseUrl);
-  console.log('PASS synthetic legacy D1 migration, Pages API security, pagination, and admin session integration');
-  await stopPages();
+  console.log('PASS synthetic legacy D1 migration, Worker API security, pagination, and admin session integration');
+  await stopWorker();
 
   await runWrangler([
     'd1', 'execute', databaseName, '--local', '--persist-to', databaseDirectory,
     '--command', 'ALTER TABLE orthocare_clinic_admin RENAME COLUMN password_salt TO invalid_password_salt;',
   ]);
-  const incompleteSchemaBaseUrl = await startPages(databaseDirectory, 503);
+  const incompleteSchemaBaseUrl = await startWorker(databaseDirectory, 503);
   const incompleteHealth = await fetch(`${incompleteSchemaBaseUrl}/api/health`);
   await assertStatus(incompleteHealth, 503, 'D1 health check with a required column missing');
-  await stopPages();
+  await stopWorker();
   console.log('PASS D1 health check rejects an incomplete normalized schema');
 
   const freshDatabaseDirectory = path.join(temporaryDirectory, 'fresh-d1');
@@ -441,9 +441,9 @@ try {
     'd1', 'migrations', 'apply', databaseName,
     '--local', '--persist-to', freshDatabaseDirectory,
   ]);
-  const freshBaseUrl = await startPages(freshDatabaseDirectory);
+  const freshBaseUrl = await startWorker(freshDatabaseDirectory);
   await testFreshAdminInitialization(freshBaseUrl);
 } finally {
-  await stopPages();
+  await stopWorker();
   await removeTemporaryDirectory();
 }
