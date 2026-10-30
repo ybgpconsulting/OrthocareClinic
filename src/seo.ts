@@ -2,38 +2,46 @@ import { VIEW_PATHS } from './context/ClinicContext';
 
 export const SITE_ORIGIN = 'https://orthocareclinic.in';
 
-export const PAGE_METADATA: Record<string, { title: string; description: string }> = {
+export const PAGE_METADATA: Record<string, { title: string; description: string; breadcrumbLabel: string }> = {
   home: {
-    title: 'Orthocare Physiotherapy Clinic | Baghpat',
-    description: 'Physiotherapy and rehabilitation care in Baghpat. Contact Orthocare Physiotherapy Clinic for appointment enquiries and home-visit availability.',
+    title: 'Physiotherapy Clinic in Baghpat | Orthocare',
+    description: 'Orthocare Physiotherapy Clinic in Tatiri, Baghpat offers pain care, rehabilitation, home visits and online consultations with Dr. Harshit Jain (PT).',
+    breadcrumbLabel: 'Home',
   },
   services: {
-    title: 'Physiotherapy Treatments in Baghpat | Orthocare',
-    description: 'Explore physiotherapy and rehabilitation treatments at Orthocare Clinic in Baghpat, including care for back pain, knee pain, sports injuries, and recovery.',
+    title: 'Physiotherapy Treatments in Baghpat | Orthocare Clinic',
+    description: 'Explore physiotherapy treatments in Baghpat for back and neck pain, sciatica, knee rehabilitation, sports injuries, stroke recovery and mobility.',
+    breadcrumbLabel: 'Physiotherapy Treatments',
   },
   about: {
-    title: 'About Orthocare Physiotherapy Clinic | Baghpat',
-    description: 'Meet Dr. Harshit Jain (PT) and learn about Orthocare Physiotherapy Clinic in Aggarwal Mandi, Tatiri, Baghpat.',
+    title: 'Dr. Harshit Jain (PT) | Orthocare Clinic, Baghpat',
+    description: 'Meet Dr. Harshit Jain (PT), physiotherapist at Orthocare Clinic in Aggarwal Mandi, Tatiri, Baghpat. Learn about his qualifications and care approach.',
+    breadcrumbLabel: 'About the Clinic',
   },
   gallery: {
-    title: 'Clinic Gallery | Orthocare Physiotherapy Clinic, Baghpat',
-    description: 'View the clinic, treatment spaces, and physiotherapy equipment at Orthocare Physiotherapy Clinic in Baghpat.',
+    title: 'Clinic Photos | Orthocare Physiotherapy, Baghpat',
+    description: 'Browse photos of Orthocare Physiotherapy Clinic’s treatment rooms, rehabilitation space and equipment in Tatiri, Baghpat, Uttar Pradesh.',
+    breadcrumbLabel: 'Clinic Gallery',
   },
   contact: {
-    title: 'Contact Orthocare Physiotherapy Clinic | Baghpat',
-    description: 'Contact Orthocare Physiotherapy Clinic in Tatiri, Baghpat for appointment enquiries, directions, clinic hours, and home-visit availability.',
+    title: 'Contact a Physiotherapist in Baghpat | Orthocare',
+    description: 'Call or message Orthocare Physiotherapy Clinic in Tatiri, Baghpat for directions, opening hours, appointment enquiries and home visits.',
+    breadcrumbLabel: 'Contact',
   },
   faqs: {
     title: 'Physiotherapy FAQs | Orthocare Clinic, Baghpat',
-    description: 'Find answers about physiotherapy treatments, clinic hours, appointments, and home visits at Orthocare Clinic in Baghpat.',
+    description: 'Answers about physiotherapy treatment, appointments, clinic hours, online consultations and home visits at Orthocare Clinic in Baghpat.',
+    breadcrumbLabel: 'FAQs',
   },
   privacy: {
     title: 'Privacy Policy | Orthocare Physiotherapy Clinic',
-    description: 'Learn how appointment details are prepared for WhatsApp and how Orthocare Physiotherapy Clinic handles your privacy.',
+    description: 'Read how Orthocare Physiotherapy Clinic prepares appointment messages for WhatsApp, what information the website stores, and your privacy choices.',
+    breadcrumbLabel: 'Privacy Policy',
   },
   admin: {
     title: 'Clinic Administration | Orthocare',
     description: 'Orthocare Physiotherapy Clinic administration portal.',
+    breadcrumbLabel: 'Administration',
   },
 };
 

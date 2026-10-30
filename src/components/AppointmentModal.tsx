@@ -8,6 +8,8 @@ import {
   getAppointmentDateOptions,
 } from '../utils/appointmentWhatsApp';
 
+const ONLINE_CONSULTATION = 'Online Physiotherapy Consultation';
+
 export function AppointmentModal() {
   const {
     isAppointmentModalOpen,
@@ -241,7 +243,12 @@ export function AppointmentModal() {
                 <select
                   id="appointment-service"
                   value={serviceRequested}
-                  onChange={(e) => setServiceRequested(e.target.value)}
+                  onChange={(e) => {
+                    setServiceRequested(e.target.value);
+                    if (e.target.value === ONLINE_CONSULTATION) {
+                      setIsHomeVisitRequested(false);
+                    }
+                  }}
                   className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
                 >
                   {services.map((srv) => (
@@ -249,6 +256,11 @@ export function AppointmentModal() {
                       {srv.name} {srv.nameHi ? `(${srv.nameHi})` : ''}
                     </option>
                   ))}
+                  {!services.some((service) => service.name === ONLINE_CONSULTATION) && (
+                    <option value={ONLINE_CONSULTATION}>
+                      {language === 'hi' ? 'ऑनलाइन फिजियोथेरेपी परामर्श' : ONLINE_CONSULTATION}
+                    </option>
+                  )}
                   <option value="General Consultation">General Physiotherapy Consultation</option>
                   <option value="Home Visit Evaluation">Home Visit Physical Evaluation</option>
                 </select>
@@ -271,27 +283,28 @@ export function AppointmentModal() {
                 </select>
               </div>
 
-              {/* Home visit checkbox */}
-              <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isHomeVisitRequested}
-                    onChange={(e) => setIsHomeVisitRequested(e.target.checked)}
-                    className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500"
-                  />
-                  <div className="text-xs">
-                    <span className="font-bold text-slate-900 block">
-                      {language === 'hi' ? 'घर पर फिजियोथेरेपी (होम विजिट) की आवश्यकता है' : 'I require Home Visit Physiotherapy at my residence'}
-                    </span>
-                    <span className="text-slate-600">
-                      {language === 'hi'
-                        ? 'बुजुर्ग या चलने में असमर्थ मरीजों के लिए टटीरी व बागपत में होम विजिट उपलब्ध है।'
-                        : 'Available for elderly or post-surgery patients in Baghpat & Tatiri upon clinic confirmation.'}
-                    </span>
-                  </div>
-                </label>
-              </div>
+              {serviceRequested !== ONLINE_CONSULTATION && (
+                <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isHomeVisitRequested}
+                      onChange={(e) => setIsHomeVisitRequested(e.target.checked)}
+                      className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-900 block">
+                        {language === 'hi' ? 'घर पर फिजियोथेरेपी (होम विजिट) की आवश्यकता है' : 'I require Home Visit Physiotherapy at my residence'}
+                      </span>
+                      <span className="text-slate-600">
+                        {language === 'hi'
+                          ? 'बुजुर्ग या चलने में असमर्थ मरीजों के लिए टटीरी व बागपत में होम विजिट उपलब्ध है।'
+                          : 'Available for elderly or post-surgery patients in Baghpat & Tatiri upon clinic confirmation.'}
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              )}
 
               {/* Message */}
               <div>

@@ -15,9 +15,21 @@ interface StructuredHours {
 
 interface StructuredGraphEntry {
   '@type'?: string;
+  '@id'?: string;
   name?: string;
+  description?: string;
+  url?: string;
+  inLanguage?: string;
   telephone?: string;
   email?: string;
+  medicalSpecialty?: string;
+  areaServed?: Array<{ name?: string }>;
+  contactPoint?: {
+    telephone?: string;
+    contactType?: string;
+    availableLanguage?: string[];
+  };
+  isPartOf?: { '@id'?: string };
   address?: {
     streetAddress?: string;
     postalCode?: string;
@@ -26,6 +38,11 @@ interface StructuredGraphEntry {
     name?: string;
     description?: string;
   };
+  itemListElement?: Array<{
+    position?: number;
+    name?: string;
+    item?: string;
+  }>;
   openingHoursSpecification?: StructuredHours[];
 }
 
@@ -70,6 +87,11 @@ for (const [view, route] of routes) {
   assert.equal(getMetaContent(html, 'property', 'og:url'), getCanonicalUrl(view));
   assert.equal(getMetaContent(html, 'name', 'twitter:title'), metadata.title);
   assert.equal(getMetaContent(html, 'name', 'twitter:description'), metadata.description);
+  if (view !== 'admin') {
+    assert.ok(metadata.title.length <= 60, `${route} title should stay concise`);
+    assert.ok(metadata.description.length >= 120 && metadata.description.length <= 160,
+      `${route} description should be a useful search snippet`);
+  }
 
   const bootstrapTag = html.match(/<script id="clinic-prerender-data" type="application\/json">([\s\S]*?)<\/script>/);
   assert.ok(bootstrapTag, `${route} is missing the hydration data`);
@@ -84,11 +106,37 @@ for (const [view, route] of routes) {
 
   assert.ok(bootstrap.initialData, `${route} is missing clinic bootstrap data`);
   const graph = getJsonLd(html)['@graph'];
+  assert.ok(graph.some((entry) => entry['@type'] === 'WebSite'), `${route} is missing the WebSite schema`);
   const clinic = graph.find((entry) => entry['@type'] === 'MedicalClinic');
   assert.ok(clinic, `${route} is missing the MedicalClinic schema`);
+  const expectedPageType = view === 'about' ? 'AboutPage' : view === 'contact' ? 'ContactPage' : 'WebPage';
+  const page = graph.find((entry) => entry['@type'] === expectedPageType);
+  assert.ok(page, `${route} is missing its ${expectedPageType} schema`);
+  assert.equal(page.url, getCanonicalUrl(view), `${route} page schema URL`);
+  assert.equal(page.name, metadata.title, `${route} page schema title`);
+  assert.equal(page.description, metadata.description, `${route} page schema description`);
+  assert.equal(page.inLanguage, 'en-IN', `${route} page schema language`);
+  assert.equal(page.isPartOf?.['@id'], 'https://orthocareclinic.in/#website');
+
+  if (view !== 'home') {
+    const breadcrumb = graph.find((entry) => entry['@type'] === 'BreadcrumbList');
+    assert.ok(breadcrumb, `${route} is missing BreadcrumbList schema`);
+    assert.deepEqual(breadcrumb.itemListElement, [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: getCanonicalUrl('home') },
+      { '@type': 'ListItem', position: 2, name: metadata.breadcrumbLabel, item: getCanonicalUrl(view) },
+    ], `${route} breadcrumb schema`);
+  }
+
   assert.equal(clinic.name, siteData.settings.clinicName);
   assert.equal(clinic.telephone, '+918864849409');
   assert.equal(clinic.email, siteData.settings.email);
+  assert.equal(clinic.medicalSpecialty, 'https://schema.org/Physiotherapy');
+  assert.deepEqual(clinic.areaServed?.map((area) => area.name), [
+    'Tatiri, Baghpat',
+    'Baghpat, Uttar Pradesh',
+  ]);
+  assert.equal(clinic.contactPoint?.telephone, '+918864849409');
+  assert.deepEqual(clinic.contactPoint?.availableLanguage, ['English', 'Hindi']);
   assert.ok(clinic.address);
   assert.equal(clinic.address.streetAddress, siteData.settings.address);
   assert.equal(clinic.address.postalCode, '250609');

@@ -2,11 +2,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const routes = [
-  { path: '/', title: 'Orthocare Physiotherapy Clinic | Baghpat' },
-  { path: '/treatments', title: 'Physiotherapy Treatments in Baghpat | Orthocare' },
-  { path: '/about', title: 'About Orthocare Physiotherapy Clinic | Baghpat' },
-  { path: '/gallery', title: 'Clinic Gallery | Orthocare Physiotherapy Clinic, Baghpat' },
-  { path: '/contact', title: 'Contact Orthocare Physiotherapy Clinic | Baghpat' },
+  { path: '/', title: 'Physiotherapy Clinic in Baghpat | Orthocare' },
+  { path: '/treatments', title: 'Physiotherapy Treatments in Baghpat | Orthocare Clinic' },
+  { path: '/about', title: 'Dr. Harshit Jain (PT) | Orthocare Clinic, Baghpat' },
+  { path: '/gallery', title: 'Clinic Photos | Orthocare Physiotherapy, Baghpat' },
+  { path: '/contact', title: 'Contact a Physiotherapist in Baghpat | Orthocare' },
   { path: '/faqs', title: 'Physiotherapy FAQs | Orthocare Clinic, Baghpat' },
   { path: '/privacy-policy', title: 'Privacy Policy | Orthocare Physiotherapy Clinic' },
 ];

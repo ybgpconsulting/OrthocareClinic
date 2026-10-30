@@ -140,6 +140,8 @@ async function testAdminApi(baseUrl) {
   const home = await fetch(baseUrl);
   const policy = home.headers.get('content-security-policy') || '';
   assert(policy.includes("script-src 'self'") && !policy.includes("'unsafe-inline'"), 'Static pages must use the restrictive Content Security Policy.');
+  assert(policy.includes('https://static.cloudflareinsights.com'), 'Static pages must allow the Cloudflare Web Analytics beacon script.');
+  assert(policy.includes('connect-src') && policy.includes('https://cloudflareinsights.com'), 'Static pages must allow Cloudflare Web Analytics reporting requests.');
   assert(home.headers.get('x-content-type-options') === 'nosniff', 'Static pages must prevent MIME sniffing.');
 
   const health = await request('/api/health');

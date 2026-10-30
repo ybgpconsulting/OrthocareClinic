@@ -13,7 +13,12 @@ const bootstrapData = JSON.parse(
   await readFile(path.resolve('public/site-data.json'), 'utf8')
 );
 
-function getClinicStructuredData(settings: ClinicSettings) {
+function getClinicStructuredData(
+  settings: ClinicSettings,
+  view: string,
+  metadata: { title: string; description: string; breadcrumbLabel: string },
+  canonicalUrl: string
+) {
   const daySchemaUrls = new Map(
     WEEKDAYS.map(({ id, label }) => [id, `https://schema.org/${label}`])
   );
@@ -29,47 +34,88 @@ function getClinicStructuredData(settings: ClinicSettings) {
   const phoneDigits = settings.phone.replace(/\D/g, '');
   const telephone = phoneDigits.startsWith('91') ? `+${phoneDigits}` : `+91${phoneDigits}`;
 
-  return {
-    '@context': 'https://schema.org',
-    '@graph': [
-      {
-        '@type': 'WebSite',
-        '@id': 'https://orthocareclinic.in/#website',
-        url: 'https://orthocareclinic.in/',
-        name: settings.clinicName,
-        inLanguage: ['en-IN', 'hi-IN'],
-        publisher: { '@id': 'https://orthocareclinic.in/#clinic' },
+  const clinicId = 'https://orthocareclinic.in/#clinic';
+  const graph: Array<Record<string, unknown>> = [
+    {
+      '@type': 'WebSite',
+      '@id': 'https://orthocareclinic.in/#website',
+      url: 'https://orthocareclinic.in/',
+      name: settings.clinicName,
+      inLanguage: ['en-IN', 'hi-IN'],
+      publisher: { '@id': clinicId },
+    },
+    {
+      '@type': 'MedicalClinic',
+      '@id': clinicId,
+      name: settings.clinicName,
+      description: `Physiotherapy and rehabilitation care at ${settings.address}.`,
+      medicalSpecialty: 'https://schema.org/Physiotherapy',
+      url: 'https://orthocareclinic.in/',
+      image: 'https://orthocareclinic.in/images/orthocare-clinic-front.png',
+      logo: 'https://orthocareclinic.in/logos/orthocare-logo-horizontal.jpg',
+      telephone,
+      email: settings.email,
+      hasMap: settings.googleMapsUrl,
+      address: {
+        '@type': 'PostalAddress',
+        streetAddress: settings.address,
+        addressLocality: settings.city,
+        addressRegion: settings.state,
+        postalCode: settings.pincode,
+        addressCountry: 'IN',
       },
-      {
-        '@type': 'MedicalClinic',
-        '@id': 'https://orthocareclinic.in/#clinic',
-        name: settings.clinicName,
-        description: `Physiotherapy and rehabilitation care at ${settings.address}.`,
-        medicalSpecialty: 'Physiotherapy',
-        url: 'https://orthocareclinic.in/',
-        image: 'https://orthocareclinic.in/images/orthocare-clinic-front.png',
-        logo: 'https://orthocareclinic.in/logos/orthocare-logo-horizontal.jpg',
+      areaServed: [
+        { '@type': 'Place', name: 'Tatiri, Baghpat' },
+        { '@type': 'AdministrativeArea', name: 'Baghpat, Uttar Pradesh' },
+      ],
+      openingHoursSpecification,
+      contactPoint: {
+        '@type': 'ContactPoint',
         telephone,
-        email: settings.email,
-        hasMap: settings.googleMapsUrl,
-        address: {
-          '@type': 'PostalAddress',
-          streetAddress: settings.address,
-          addressLocality: settings.city,
-          addressRegion: settings.state,
-          postalCode: settings.pincode,
-          addressCountry: 'IN',
-        },
-        openingHoursSpecification,
-        employee: {
-          '@type': 'Person',
-          name: settings.doctorName,
-          jobTitle: 'Physiotherapist',
-          description: settings.doctorQualifications,
-        },
+        contactType: 'appointments and clinic enquiries',
+        availableLanguage: ['English', 'Hindi'],
       },
-    ],
-  };
+      employee: {
+        '@type': 'Person',
+        name: settings.doctorName,
+        jobTitle: 'Physiotherapist',
+        description: settings.doctorQualifications,
+      },
+    },
+    {
+      '@type': view === 'about' ? 'AboutPage' : view === 'contact' ? 'ContactPage' : 'WebPage',
+      '@id': `${canonicalUrl}#webpage`,
+      url: canonicalUrl,
+      name: metadata.title,
+      description: metadata.description,
+      inLanguage: 'en-IN',
+      isPartOf: { '@id': 'https://orthocareclinic.in/#website' },
+      about: { '@id': clinicId },
+    },
+  ];
+
+  if (view !== 'home') {
+    graph.push({
+      '@type': 'BreadcrumbList',
+      '@id': `${canonicalUrl}#breadcrumb`,
+      itemListElement: [
+        {
+          '@type': 'ListItem',
+          position: 1,
+          name: 'Home',
+          item: 'https://orthocareclinic.in/',
+        },
+        {
+          '@type': 'ListItem',
+          position: 2,
+          name: metadata.breadcrumbLabel,
+          item: canonicalUrl,
+        },
+      ],
+    });
+  }
+
+  return { '@context': 'https://schema.org', '@graph': graph };
 }
 
 await build({
@@ -95,8 +141,16 @@ try {
       React.createElement(App, { initialData, initialView: view })
     );
     const bootstrap = JSON.stringify({ initialView: view, initialData }).replace(/</g, '\\u003c');
+    const canonicalUrl = getCanonicalUrl(view);
     const schemaJson = initialData
-      ? JSON.stringify(getClinicStructuredData(initialData.settings as ClinicSettings)).replace(/</g, '\\u003c')
+      ? JSON.stringify(
+          getClinicStructuredData(
+            initialData.settings as ClinicSettings,
+            view,
+            metadata,
+            canonicalUrl
+          )
+        ).replace(/</g, '\\u003c')
       : null;
     if (!template.includes('<div id="root"></div>')) {
       throw new Error('Production HTML template is missing the application root');
@@ -114,7 +168,7 @@ try {
       )
       .replace(
         /<link rel="canonical" href="[^"]*" \/>/,
-        `<link rel="canonical" href="${getCanonicalUrl(view)}" />`
+        `<link rel="canonical" href="${canonicalUrl}" />`
       )
       .replace(
         /<meta property="og:title" content="[^"]*" \/>/,
@@ -126,7 +180,7 @@ try {
       )
       .replace(
         /<meta property="og:url" content="[^"]*" \/>/,
-        `<meta property="og:url" content="${getCanonicalUrl(view)}" />`
+        `<meta property="og:url" content="${canonicalUrl}" />`
       )
       .replace(
         /<meta name="twitter:title" content="[^"]*" \/>/,

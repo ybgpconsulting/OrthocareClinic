@@ -21,6 +21,8 @@ import {
 import { WhatsAppIcon } from '../components/WhatsAppIcon';
 import { ResponsiveImage } from '../components/ResponsiveImage';
 
+const ONLINE_CONSULTATION = 'Online Physiotherapy Consultation';
+
 export function HomePage() {
   const {
     settings,
@@ -83,6 +85,32 @@ export function HomePage() {
               <Activity className="w-3.5 h-3.5 text-amber-700" />
               <span>{content?.heroTagline || 'Certified Physiotherapy & Pain Relief Care in Baghpat'}</span>
             </div>
+
+            <button
+              type="button"
+              onClick={() => openAppointmentModal(ONLINE_CONSULTATION)}
+              className="group w-full rounded-2xl border-2 border-emerald-500 bg-emerald-50 px-4 py-3 text-left shadow-sm transition-colors hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 sm:px-5"
+              aria-label={language === 'hi'
+                ? 'ऑनलाइन फिजियोथेरेपी परामर्श बुक करें'
+                : 'Book an online physiotherapy consultation'}
+            >
+              <span className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white max-[360px]:h-8 max-[360px]:w-8">
+                  <WhatsAppIcon className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-extrabold text-emerald-950 sm:text-base">
+                    {language === 'hi' ? 'ऑनलाइन परामर्श' : 'Online Consultation'}
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-emerald-900 sm:text-sm max-[360px]:hidden">
+                    {language === 'hi'
+                      ? 'WhatsApp पर अपॉइंटमेंट विवरण भेजें'
+                      : 'Book your physiotherapy consultation through WhatsApp'}
+                  </span>
+                </span>
+                <ArrowRight className="h-5 w-5 shrink-0 text-emerald-800 transition-transform group-hover:translate-x-0.5 max-[360px]:h-4 max-[360px]:w-4" aria-hidden="true" />
+              </span>
+            </button>
 
             {/* Main Headline */}
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-[1.15] text-balance">
