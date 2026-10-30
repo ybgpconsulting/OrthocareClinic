@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useClinic } from '../context/ClinicContext';
-import { api } from '../api';
-import { X, Calendar, Phone, CheckCircle2, AlertCircle, Home, Clock } from 'lucide-react';
+import { X, Calendar, Phone, CheckCircle2, AlertCircle, Home } from 'lucide-react';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import { useDialogFocus } from '../hooks/useDialogFocus';
+import {
+  buildAppointmentWhatsAppMessage,
+  getAppointmentDateOptions,
+} from '../utils/appointmentWhatsApp';
 
 export function AppointmentModal() {
   const {
@@ -19,14 +22,12 @@ export function AppointmentModal() {
   const [patientName, setPatientName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [serviceRequested, setServiceRequested] = useState('');
-  const [preferredDate, setPreferredDate] = useState('');
-  const [preferredTimeSlot, setPreferredTimeSlot] = useState('Morning (9:00 AM – 1:30 PM)');
+  const [preferredDate, setPreferredDate] = useState(() => getAppointmentDateOptions('en')[0].value);
   const [isHomeVisitRequested, setIsHomeVisitRequested] = useState(false);
   const [message, setMessage] = useState('');
-  const [website, setWebsite] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [whatsappUrl, setWhatsappUrl] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useDialogFocus(
@@ -46,7 +47,7 @@ export function AppointmentModal() {
 
   if (!isAppointmentModalOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -54,40 +55,33 @@ export function AppointmentModal() {
       setError(language === 'hi' ? 'कृपया अपना नाम दर्ज करें।' : 'Please enter the patient name.');
       return;
     }
-    const cleanPhone = phoneNumber.replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
+    if (!/^\d{10}$/.test(phoneNumber)) {
       setError(language === 'hi' ? 'कृपया मान्य 10 अंकों का मोबाइल नंबर दर्ज करें।' : 'Please enter a valid 10-digit mobile number.');
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      await api.submitEnquiry({
-        patientName: patientName.trim(),
-        phoneNumber: cleanPhone,
-        serviceRequested: serviceRequested || 'General Consultation',
-        preferredDate,
-        preferredTimeSlot,
-        message,
-        isHomeVisitRequested,
-        website,
-      });
-
-      setIsSuccess(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit appointment enquiry. Please try calling directly.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    const requestMessage = buildAppointmentWhatsAppMessage({
+      patientName: patientName.trim(),
+      phoneNumber,
+      serviceRequested: serviceRequested || 'General Consultation',
+      preferredDate,
+      isHomeVisitRequested,
+      message,
+    }, language);
+    const url = getWhatsappUrl(requestMessage);
+    setWhatsappUrl(url);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setIsSuccess(true);
   };
 
   const resetAndClose = () => {
     setIsSuccess(false);
     setError(null);
+    setWhatsappUrl('');
     setPatientName('');
     setPhoneNumber('');
+    setPreferredDate(getAppointmentDateOptions(language)[0].value);
     setMessage('');
-    setWebsite('');
     setIsHomeVisitRequested(false);
     setIsAppointmentModalOpen(false);
   };
@@ -134,14 +128,24 @@ export function AppointmentModal() {
                 <CheckCircle2 className="w-10 h-10" />
               </div>
               <h4 className="text-xl font-bold text-slate-900">
-                {language === 'hi' ? 'अनुरोध सफलतापूर्वक प्राप्त हुआ!' : 'Enquiry Received Successfully!'}
+                {language === 'hi' ? 'व्हाट्सएप संदेश तैयार है' : 'WhatsApp message is ready'}
               </h4>
               <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-                {settings?.appointmentNotice ||
-                  'Thank you. Submitting an enquiry does not automatically book a slot. Our clinic staff will call or WhatsApp you shortly to confirm availability.'}
+                {language === 'hi'
+                  ? 'यदि व्हाट्सएप अपने आप नहीं खुला, तो नीचे दिए बटन से संदेश खोलें। अनुरोध भेजने के लिए WhatsApp में Send दबाएं। यह वेबसाइट आपकी जानकारी सेव नहीं करती।'
+                  : 'If WhatsApp did not open, use the button below. Review the message and tap Send there to submit your request. This website does not store these details.'}
               </p>
 
               <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 text-white text-xs sm:text-sm font-bold hover:bg-emerald-700 transition-colors"
+                >
+                  <WhatsAppIcon className="w-4 h-4" />
+                  <span>{language === 'hi' ? 'व्हाट्सएप संदेश खोलें' : 'Open WhatsApp message'}</span>
+                </a>
                 <a
                   href={`tel:${settings?.phone || '8864849409'}`}
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 text-white text-xs sm:text-sm font-bold hover:bg-slate-800 transition-colors"
@@ -160,37 +164,25 @@ export function AppointmentModal() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
-                <input
-                  type="text"
-                  name="website"
-                  tabIndex={-1}
-                  autoComplete="off"
-                  value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
-                />
-              </div>
-              {/* WhatsApp option before appointment details */}
-              <div className="text-center">
-                <p className="text-xs text-slate-500 mb-2">Prefer instant confirmation?</p>
-                <a
-                  href={getWhatsappUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 w-full h-12 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-xs transition-colors"
-                >
-                  <WhatsAppIcon className="w-4 h-4" />
-                  <span>{language === 'hi' ? 'व्हाट्सएप पर तुरंत चैट करें' : 'Chat & Book Directly on WhatsApp'}</span>
-                </a>
-              </div>
+              <a
+                href={getWhatsappUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full min-h-12 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              >
+                <WhatsAppIcon className="h-4 w-4" aria-hidden="true" />
+                <span>{language === 'hi' ? 'WhatsApp पर सीधे संदेश भेजें' : 'Message us directly on WhatsApp'}</span>
+              </a>
 
-              <div className="flex items-center gap-3 py-1" aria-hidden="true">
-                <span className="h-px flex-1 bg-slate-200" />
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  {language === 'hi' ? 'या फॉर्म भरें' : 'Or fill out the form'}
-                </span>
-                <span className="h-px flex-1 bg-slate-200" />
-              </div>
+              <p className="text-center text-xs font-semibold text-slate-500">
+                {language === 'hi' ? 'या अपॉइंटमेंट विवरण भरें' : 'Or fill in the appointment details'}
+              </p>
+
+              <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-950">
+                {language === 'hi'
+                  ? 'विवरण भरने के बाद व्हाट्सएप संदेश तैयार होगा। अनुरोध भेजने के लिए आपको WhatsApp में Send दबाना होगा। आपकी जानकारी इस वेबसाइट पर सेव नहीं होगी।'
+                  : 'After you continue, a WhatsApp message is prepared. You must tap Send in WhatsApp to submit; this website does not store your enquiry.'}
+              </p>
 
               {error && (
                 <div role="alert" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm flex items-start gap-2.5">
@@ -229,10 +221,13 @@ export function AppointmentModal() {
                     id="appointment-phone"
                     type="tel"
                     required
-                    maxLength={24}
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    minLength={10}
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="8864849409"
+                    autoComplete="tel-national"
                     className="w-full pl-14 pr-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none transition-all tabular-nums"
                   />
                 </div>
@@ -259,36 +254,21 @@ export function AppointmentModal() {
                 </select>
               </div>
 
-              {/* Date & Slot */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="appointment-date" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                    {language === 'hi' ? 'पसंदीदा तारीख' : 'Preferred Date'}
-                  </label>
-                  <input
-                    id="appointment-date"
-                    type="date"
-                    value={preferredDate}
-                    min={new Date().toISOString().split('T')[0]}
-                    onChange={(e) => setPreferredDate(e.target.value)}
-                    className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="appointment-time" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                    {language === 'hi' ? 'समय स्लॉट' : 'Preferred Slot'}
-                  </label>
-                  <select
-                    id="appointment-time"
-                    value={preferredTimeSlot}
-                    onChange={(e) => setPreferredTimeSlot(e.target.value)}
-                    className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
-                  >
-                    <option value="Morning (9:00 AM – 1:30 PM)">Morning: 9:00 AM – 1:30 PM</option>
-                    <option value="Evening (4:30 PM – 8:00 PM)">Evening: 4:30 PM – 8:00 PM</option>
-                  </select>
-                </div>
+              {/* Appointment date */}
+              <div>
+                <label htmlFor="appointment-date" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  {language === 'hi' ? 'पसंदीदा तारीख' : 'Preferred Date'}
+                </label>
+                <select
+                  id="appointment-date"
+                  value={preferredDate}
+                  onChange={(e) => setPreferredDate(e.target.value)}
+                  className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
+                >
+                  {getAppointmentDateOptions(language).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Home visit checkbox */}
@@ -332,16 +312,13 @@ export function AppointmentModal() {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
                 className="w-full h-13 sm:h-12 py-3 px-4 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-bold text-sm sm:text-base shadow-sm transition-all active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
-                <Calendar className="w-4 h-4 text-amber-400" />
+                <WhatsAppIcon className="w-4 h-4 text-amber-400" />
                 <span>
-                  {isSubmitting
-                    ? 'Submitting Request...'
-                    : language === 'hi'
+                  {language === 'hi'
                     ? 'अपॉइंटमेंट अनुरोध भेजें'
-                    : 'Submit Appointment Enquiry'}
+                    : 'Continue to WhatsApp'}
                 </span>
               </button>
             </form>

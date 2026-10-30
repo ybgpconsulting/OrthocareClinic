@@ -54,9 +54,26 @@ configured for the Worker and existing D1 database:
 4. Configure a separate test D1 database for non-production deployments to
    avoid changing production data.
 
-Admin sessions use an `HttpOnly`, `Secure`, `SameSite=Strict` cookie and are
-never accepted from URL parameters or authorization headers. Login attempts
-are rate-limited to five failures per IP within a 15-minute window using the
+   #### One-time production admin password reset
+
+   If the administrator password is lost, run this utility from an interactive
+   PowerShell terminal in the project directory:
+
+   ```powershell
+   node scripts/reset-admin-password.mjs
+   ```
+
+   The utility verifies the configured production Worker and D1 database, requires
+   typing `PRODUCTION orthocareclinic`, and prompts twice for a 15-128 character
+   password without echoing it. It updates only the singleton administrator's
+   password salt and hash, revokes all administrator sessions, and verifies that
+   the administrator row still exists. It does not create an account, change
+   clinic data, alter Worker secrets, or deploy the Worker. Keep the password out
+   of chat and command history.
+
+   Admin sessions use an `HttpOnly`, `Secure`, `SameSite=Strict` cookie and are
+   never accepted from URL parameters or authorization headers. Login attempts
+   are rate-limited to five failures per IP within a 15-minute window using the
 hashed-IP records in D1. Changing the password revokes all active sessions and
 requires signing in again. Passwords are currently stored with the legacy
 PBKDF2-HMAC-SHA-512 format at 10,000 iterations. The work factor was

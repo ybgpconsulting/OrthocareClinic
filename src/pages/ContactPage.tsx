@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { useClinic } from '../context/ClinicContext';
-import { api } from '../api';
-import { Phone, MapPin, Clock, Calendar, CheckCircle2, AlertCircle, Home, Mail } from 'lucide-react';
+import { Phone, MapPin, Clock, CheckCircle2, AlertCircle, Home, Mail } from 'lucide-react';
 import { WeeklyHours } from '../components/WeeklyHours';
 import { WhatsAppIcon } from '../components/WhatsAppIcon';
+import {
+  buildAppointmentWhatsAppMessage,
+  getAppointmentDateOptions,
+} from '../utils/appointmentWhatsApp';
 
 export function ContactPage() {
   const { settings, getWhatsappUrl, language, services } = useClinic();
@@ -11,15 +14,14 @@ export function ContactPage() {
   const [patientName, setPatientName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [serviceRequested, setServiceRequested] = useState('General Consultation');
-  const [preferredDate, setPreferredDate] = useState('');
+  const [preferredDate, setPreferredDate] = useState(() => getAppointmentDateOptions('en')[0].value);
   const [isHomeVisitRequested, setIsHomeVisitRequested] = useState(false);
   const [message, setMessage] = useState('');
-  const [website, setWebsite] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [whatsappUrl, setWhatsappUrl] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -27,29 +29,23 @@ export function ContactPage() {
       setError(language === 'hi' ? 'कृपया अपना नाम दर्ज करें।' : 'Please enter the patient name.');
       return;
     }
-    const cleanPhone = phoneNumber.replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
+    if (!/^\d{10}$/.test(phoneNumber)) {
       setError(language === 'hi' ? 'कृपया 10 अंकों का मान्य मोबाइल नंबर दर्ज करें।' : 'Please enter a valid 10-digit mobile number.');
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      await api.submitEnquiry({
-        patientName: patientName.trim(),
-        phoneNumber: cleanPhone,
-        serviceRequested,
-        preferredDate,
-        message,
-        isHomeVisitRequested,
-        website,
-      });
-      setIsSuccess(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit enquiry. Please call us directly.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    const requestMessage = buildAppointmentWhatsAppMessage({
+      patientName: patientName.trim(),
+      phoneNumber,
+      serviceRequested,
+      preferredDate,
+      isHomeVisitRequested,
+      message,
+    }, language);
+    const url = getWhatsappUrl(requestMessage);
+    setWhatsappUrl(url);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setIsSuccess(true);
   };
 
   return (
@@ -68,8 +64,8 @@ export function ContactPage() {
         </h1>
         <p className="text-base text-slate-600 leading-relaxed">
           {language === 'hi'
-            ? 'अपॉइंटमेंट लेने, क्लिनिक का रूट जानने या घर पर फिजियोथेरेपी (होम विजिट) की जानकारी के लिए सीधे फोन करें, व्हाट्सएप मैसेज भेजें या नीचे दिया फॉर्म भरें।'
-            : 'Call directly, connect on WhatsApp, or send an enquiry to consult with Dr. Harshit Jain (PT) at our Tatiri, Baghpat clinic.'}
+            ? 'अपॉइंटमेंट, रास्ते या होम विजिट की जानकारी के लिए सीधे फोन करें या व्हाट्सएप पर संदेश भेजें।'
+            : 'Call or message us on WhatsApp about appointments, directions, or home visits at our Tatiri, Baghpat clinic.'}
         </p>
       </div>
 
@@ -166,53 +162,58 @@ export function ContactPage() {
           </div>
         </div>
 
-        {/* Enquiry Form */}
+        {/* WhatsApp Appointment Request */}
         <div className="lg:col-span-7 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs">
           <div className="mb-6 space-y-1">
             <h2 className="text-xl font-bold text-slate-900">
-              {language === 'hi' ? 'अपॉइंटमेंट एवं परामर्श फॉर्म' : 'Send an Appointment Enquiry'}
+              {language === 'hi' ? 'व्हाट्सएप पर अपॉइंटमेंट अनुरोध' : 'Prepare an Appointment Message'}
             </h2>
             <p className="text-xs text-slate-500">
-              {settings?.appointmentNotice ||
-                'Please note: Submitting this form does not confirm an immediate booking. Our clinic staff will call you to confirm.'}
+              {language === 'hi'
+                ? 'विवरण भरें; आपका संदेश व्हाट्सएप में खुलेगा। अनुरोध भेजने के लिए आपको WhatsApp में Send दबाना होगा।'
+                : 'Enter your details to prepare a WhatsApp message. You must tap Send in WhatsApp to submit your request.'}
             </p>
           </div>
 
           {isSuccess ? (
-            <div className="text-center py-10 space-y-4">
+            <div role="status" aria-live="polite" className="text-center py-10 space-y-4">
               <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h3 className="text-lg font-bold text-slate-900">
-                {language === 'hi' ? 'आपका अनुरोध प्राप्त हुआ!' : 'Enquiry Submitted Successfully!'}
+                {language === 'hi' ? 'व्हाट्सएप संदेश तैयार है' : 'WhatsApp message is ready'}
               </h3>
               <p className="text-sm text-slate-600 max-w-md mx-auto">
-                Our clinic team will reach out to you on <span className="font-bold tabular-nums">{phoneNumber}</span> shortly.
+                {language === 'hi'
+                  ? 'यदि व्हाट्सएप अपने आप नहीं खुला, तो नीचे दिए बटन से संदेश खोलें। अनुरोध भेजने के लिए WhatsApp में Send दबाएं। यह वेबसाइट आपकी जानकारी सेव नहीं करती।'
+                  : 'If WhatsApp did not open, use the button below. Review the message and tap Send there to submit your request. This website does not store these details.'}
               </p>
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              >
+                <WhatsAppIcon className="h-4 w-4" aria-hidden="true" />
+                {language === 'hi' ? 'व्हाट्सएप संदेश खोलें' : 'Open WhatsApp message'}
+              </a>
               <button
                 onClick={() => {
                   setIsSuccess(false);
                   setPatientName('');
                   setPhoneNumber('');
+                  setPreferredDate(getAppointmentDateOptions(language)[0].value);
                   setMessage('');
+                  setIsHomeVisitRequested(false);
+                  setWhatsappUrl('');
                 }}
                 className="mt-4 px-5 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800"
               >
-                Submit Another Enquiry
+                {language === 'hi' ? 'दूसरा अनुरोध तैयार करें' : 'Prepare Another Request'}
               </button>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div aria-hidden="true" className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
-                <input
-                  type="text"
-                  name="website"
-                  tabIndex={-1}
-                  autoComplete="off"
-                  value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
-                />
-              </div>
               {error && (
                 <div role="alert" aria-live="assertive" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2">
                   <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
@@ -249,10 +250,13 @@ export function ContactPage() {
                       id="contact-phone"
                       type="tel"
                       required
-                      maxLength={24}
+                      inputMode="numeric"
+                      pattern="[0-9]{10}"
+                      minLength={10}
                       value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="8864849409"
+                      autoComplete="tel-national"
                       className="w-full pl-14 pr-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none tabular-nums transition-all"
                     />
                   </div>
@@ -283,14 +287,16 @@ export function ContactPage() {
                   <label htmlFor="contact-date" className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
                     {language === 'hi' ? 'पसंदीदा तारीख' : 'Preferred Date'}
                   </label>
-                  <input
+                  <select
                     id="contact-date"
-                    type="date"
-                    min={new Date().toISOString().split('T')[0]}
                     value={preferredDate}
                     onChange={(e) => setPreferredDate(e.target.value)}
                     className="w-full px-4 py-3 text-base sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none bg-white transition-all"
-                  />
+                  >
+                    {getAppointmentDateOptions(language).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -331,16 +337,13 @@ export function ContactPage() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
                 className="w-full h-13 sm:h-12 py-3 px-4 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-bold text-sm sm:text-base shadow-sm transition-all active:scale-98 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
-                <Calendar className="w-4 h-4 text-amber-400" />
+                <WhatsAppIcon className="w-4 h-4 text-amber-400" />
                 <span>
-                  {isSubmitting
-                    ? 'Submitting...'
-                    : language === 'hi'
+                  {language === 'hi'
                     ? 'अपॉइंटमेंट अनुरोध भेजें'
-                    : 'Submit Consultation Request'}
+                    : 'Continue to WhatsApp'}
                 </span>
               </button>
             </form>

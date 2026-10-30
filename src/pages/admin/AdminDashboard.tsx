@@ -720,7 +720,7 @@ export function AdminDashboard() {
 
             {!stats?.recentEnquiries.length ? (
               <div className="text-center py-8 text-slate-400 text-xs">
-                No patient enquiries yet. Submitted forms will appear here in real-time.
+                No stored patient enquiries yet. New website requests are sent directly through WhatsApp and are not saved here.
               </div>
             ) : (
               <div className="divide-y divide-slate-100">

@@ -21,7 +21,7 @@ interface ClinicContextType {
   openAppointmentModal: (serviceName?: string) => void;
   selectedService: TreatmentService | null;
   setSelectedService: (service: TreatmentService | null) => void;
-  getWhatsappUrl: () => string;
+  getWhatsappUrl: (message?: string) => string;
   refreshData: () => Promise<void>;
 }
 
@@ -125,9 +125,9 @@ export function ClinicProvider({
     setIsAppointmentModalOpen(true);
   };
 
-  const getWhatsappUrl = () => {
+  const getWhatsappUrl = (customMessage?: string) => {
     const phone = settings?.whatsappNumber || '918864849409';
-    const message = 'Namaste! Maine aapki website dekhi h aur mujhe physiotherapy ke liye appointment book karni hai.';
+    const message = customMessage || 'Namaste! Maine aapki website dekhi h aur mujhe physiotherapy ke liye appointment book karni hai.';
     return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
   };
 

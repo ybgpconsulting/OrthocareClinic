@@ -1,9 +1,9 @@
 import React from 'react';
 import { useClinic } from '../context/ClinicContext';
-import { Shield, Lock, FileText, Phone } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 export function PrivacyPolicyPage() {
-  const { settings, content } = useClinic();
+  const { settings } = useClinic();
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10">
@@ -28,14 +28,15 @@ export function PrivacyPolicyPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-bold text-slate-900">1. Overview & Purpose</h2>
           <p>
-            {content?.privacyPolicy ||
-              'Orthocare Physiotherapy Clinic respects your privacy. Any personal information (name, contact number, medical concern) provided through this website or appointment forms is used solely to coordinate appointments and clinical communications.'}
+            Orthocare Physiotherapy Clinic respects your privacy. Appointment details entered on this website are used in your browser to prepare a WhatsApp message. The website does not submit or store those details.
           </p>
         </section>
 
         <section className="space-y-3">
           <h2 className="text-lg font-bold text-slate-900">2. Information We Collect</h2>
-          <p>When you use our appointment enquiry form or contact our clinic, we may collect:</p>
+          <p>
+            If you choose to prepare an appointment message, the details below are placed into a WhatsApp message. Nothing is sent to the clinic until you review and send that message in WhatsApp.
+          </p>
           <ul className="list-disc list-inside space-y-1.5 pl-2 text-slate-600">
             <li>Patient Name</li>
             <li>Contact Phone Number (Mobile)</li>
@@ -49,15 +50,13 @@ export function PrivacyPolicyPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-bold text-slate-900">3. How Your Information Is Used</h2>
           <p>
-            Information collected through this website is strictly utilized to:
+            Details entered in the appointment form are used only in your browser to:
           </p>
           <ul className="list-disc list-inside space-y-1.5 pl-2 text-slate-600">
-            <li>Contact you via telephone or WhatsApp to schedule and confirm appointment times.</li>
-            <li>Allow Dr. Harshit Jain (PT) to prepare preliminary clinical advice or assess home-visit feasibility.</li>
-            <li>Maintain internal clinic appointment records and follow-ups.</li>
+            <li>Prepare an appointment enquiry message for you to review and send to the clinic via WhatsApp.</li>
           </ul>
           <p className="font-semibold text-slate-800">
-            We never sell, rent, lease, or share your contact or medical details with third-party marketing companies.
+            WhatsApp is operated by Meta. If you send the message, WhatsApp and the clinic will receive its contents under their applicable privacy practices. Do not include sensitive medical information you do not wish to share.
           </p>
         </section>
 
@@ -71,7 +70,7 @@ export function PrivacyPolicyPage() {
         <section className="space-y-3">
           <h2 className="text-lg font-bold text-slate-900">5. Contact Regarding Your Data</h2>
           <p>
-            If you wish to update or remove any enquiry submitted through this website, you may contact the clinic owner directly:
+            To discuss information you sent to the clinic through WhatsApp, contact the clinic owner directly:
           </p>
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
             <p className="font-bold text-slate-900">{settings?.clinicName || 'Orthocare Physiotherapy Clinic'}</p>

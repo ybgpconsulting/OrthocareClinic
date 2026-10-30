@@ -29,7 +29,7 @@ export const PAGE_METADATA: Record<string, { title: string; description: string 
   },
   privacy: {
     title: 'Privacy Policy | Orthocare Physiotherapy Clinic',
-    description: 'Read how Orthocare Physiotherapy Clinic handles information submitted through its website and appointment enquiries.',
+    description: 'Learn how appointment details are prepared for WhatsApp and how Orthocare Physiotherapy Clinic handles your privacy.',
   },
   admin: {
     title: 'Clinic Administration | Orthocare',

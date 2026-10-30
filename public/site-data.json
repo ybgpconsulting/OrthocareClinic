@@ -43,7 +43,7 @@
     "aboutDoctorBioHi": "डॉ. हर्षित जैन (BPT, COMT, MIAP, CNDS दिल्ली) एक योग्य एवं अनुभवी फिजियोथेरेपिस्ट हैं। वे सटीक जांच, मैन्युअल थेरेपी और वैज्ञानिक व्यायामों के माध्यम से मरीजों को दर्द से राहत दिलाने में समर्पित हैं।",
     "announcementText": "Consultations available at clinic daily. Home visit slots can be booked via phone or WhatsApp.",
     "announcementActive": true,
-    "privacyPolicy": "Orthocare Physiotherapy Clinic respects your privacy. Any personal information (name, contact number, medical concern) provided through this website or appointment forms is used solely to coordinate appointments and clinical communications. We never sell, lease, or share patient data with third parties. For any inquiries regarding your information, please call us directly at 8864849409.",
+    "privacyPolicy": "Orthocare Physiotherapy Clinic respects your privacy. Appointment details entered on this website are used in your browser to prepare a WhatsApp message. The website does not submit or store those details. If you choose to send the message, WhatsApp and the clinic receive its contents under their applicable privacy practices.",
     "treatmentBannerText": "Personalized treatment programs designed around each patient’s physical capability and lifestyle."
   },
   "categories": [
